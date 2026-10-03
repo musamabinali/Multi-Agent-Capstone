@@ -6,9 +6,25 @@ import sys
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
 from typer.testing import CliRunner
 
 runner = CliRunner()
+
+
+@pytest.fixture(autouse=True)
+def _force_mock_google_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hermetic settings: these CLI tests must not depend on the ambient .env.
+
+    A developer .env with GOOGLE_MCP_MODE=local (and no token cache) would
+    otherwise trip the exit-3 reauth path before the mocked tools run.
+    """
+    from makpa.config import get_settings
+
+    monkeypatch.setenv("GOOGLE_MCP_MODE", "mock")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 def _probe_ok():
@@ -318,3 +334,47 @@ def test_helpers_and_main():
         patch.object(sys, "stderr", bad),
     ):
         google_demo._setup_logging()
+
+
+def test_login_command_paths():
+    from makpa.cli import google_demo
+    from makpa.google.oauth import ReauthRequiredError
+
+    with (
+        patch("makpa.google.oauth.run_browser_flow", return_value={"ok": True}),
+        patch("makpa.cli.google_demo.print_startup_banner"),
+    ):
+        res = runner.invoke(google_demo.app, ["login"])
+    assert res.exit_code == 0 and "cached" in res.output
+
+    with (
+        patch(
+            "makpa.google.oauth.run_browser_flow",
+            side_effect=ReauthRequiredError("http://reauth"),
+        ),
+        patch("makpa.cli.google_demo.print_startup_banner"),
+    ):
+        res = runner.invoke(google_demo.app, ["login"])
+    assert res.exit_code == 3
+
+    with (
+        patch(
+            "makpa.google.oauth.run_browser_flow",
+            side_effect=RuntimeError("access_denied"),
+        ),
+        patch("makpa.cli.google_demo.print_startup_banner"),
+    ):
+        res = runner.invoke(google_demo.app, ["login"])
+    assert res.exit_code == 1 and "Test users" in res.output
+
+    with (
+        patch(
+            "makpa.google.oauth.run_browser_flow",
+            side_effect=RuntimeError(
+                'Google token endpoint error 400: {"error": "invalid_grant"}'
+            ),
+        ),
+        patch("makpa.cli.google_demo.print_startup_banner"),
+    ):
+        res = runner.invoke(google_demo.app, ["login"])
+    assert res.exit_code == 1 and "single-use" in res.output

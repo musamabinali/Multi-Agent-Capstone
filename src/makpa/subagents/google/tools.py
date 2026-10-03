@@ -12,7 +12,7 @@ import logging
 from typing import Any
 
 from langchain_core.tools import tool
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from makpa.google.client import CALENDAR_SERVER, GMAIL_SERVER, get_google_client
 
@@ -60,6 +60,15 @@ def validate_email_list(values: list[str] | None, field: str = "to") -> list[str
     return checked
 
 
+def _coerce_str_list(value: Any) -> Any:
+    """Wrap a bare string in a list (planners often emit one bare address)."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value] if value.strip() else []
+    return value
+
+
 class ListEventsArgs(BaseModel):  # type: ignore[misc]
     """Arguments for listing Calendar events."""
 
@@ -79,6 +88,11 @@ class CreateEventArgs(BaseModel):  # type: ignore[misc]
     description: str = Field(default="")
     calendar_id: str = Field(default="primary")
 
+    @field_validator("attendees", mode="before")  # type: ignore[untyped-decorator]
+    @classmethod
+    def _coerce_attendees(cls, v: Any) -> Any:
+        return _coerce_str_list(v)
+
 
 class CheckAvailabilityArgs(BaseModel):  # type: ignore[misc]
     """Arguments for free/busy checks."""
@@ -87,6 +101,11 @@ class CheckAvailabilityArgs(BaseModel):  # type: ignore[misc]
     time_max: str = Field(description="Range end (ISO 8601)")
     attendees: list[str] = Field(default_factory=list)
     calendar_id: str = Field(default="primary")
+
+    @field_validator("attendees", mode="before")  # type: ignore[untyped-decorator]
+    @classmethod
+    def _coerce_attendees(cls, v: Any) -> Any:
+        return _coerce_str_list(v)
 
 
 class UpdateEventArgs(BaseModel):  # type: ignore[misc]
@@ -122,6 +141,11 @@ class DraftMessageArgs(BaseModel):  # type: ignore[misc]
     cc: list[str] = Field(default_factory=list)
     bcc: list[str] = Field(default_factory=list)
 
+    @field_validator("to", "cc", "bcc", mode="before")  # type: ignore[untyped-decorator]
+    @classmethod
+    def _coerce_recipients(cls, v: Any) -> Any:
+        return _coerce_str_list(v)
+
 
 class SendMessageArgs(BaseModel):  # type: ignore[misc]
     """Arguments for sending (mutating)."""
@@ -132,6 +156,11 @@ class SendMessageArgs(BaseModel):  # type: ignore[misc]
     cc: list[str] = Field(default_factory=list)
     bcc: list[str] = Field(default_factory=list)
     draft_id: str = Field(default="")
+
+    @field_validator("to", "cc", "bcc", mode="before")  # type: ignore[untyped-decorator]
+    @classmethod
+    def _coerce_recipients(cls, v: Any) -> Any:
+        return _coerce_str_list(v)
 
 
 @tool("calendar_list_events", args_schema=ListEventsArgs)  # type: ignore[untyped-decorator]

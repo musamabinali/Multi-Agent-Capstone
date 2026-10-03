@@ -130,6 +130,10 @@ EMBEDDING_PROVIDER=gemini       # opt-in, needs GEMINI_API_KEY
 Every CLI runs `probe_llm()` after the banner: a one-token completion that
 warns on known-stale model names (`gemini-1.5-flash`, `llama-3.1-70b-versatile`)
 and fails fast in `live` mode when no real provider validates.
+Run the real flow with one line (from the repo root, keep GOOGLE_MCP_MODE=local):
+
+python -c "from makpa.google.oauth import run_browser_flow; run_browser_flow(); print('cached OK')"
+
 
 ```bash
 # Pre-warm the HF embedding cache once (first download ~60s, then cached)
@@ -190,6 +194,7 @@ python -m makpa.cli.google_demo send --to a@x.com --subject "Hi" --body "Hello"
 
 # Composite scheduling flow (two gates: event, then email)
 python -m makpa.cli.google_demo ask "schedule a meeting with a@x.com from 2026-10-02T15:00:00Z to 2026-10-02T16:00:00Z"
+python -m makpa.cli.google_demo ask "Schedule 'Project Sync' with musamabinali@gmail.com from 2026-10-05T14:00:00+05:00 to 2026-10-05T14:30:00+05:00 and email them 'Hi, confirming our project sync on Monday at 2 PM PKT. Reply if another time suits you better.'"
 ```
 
 ### OAuth setup (free/live modes)
@@ -208,8 +213,9 @@ marked **manually verified by the user**:
 
 1. Set `GOOGLE_CLIENT_ID` (+secret), `GOOGLE_MCP_MODE=local`, and a fresh
    `GOOGLE_TOKEN_CACHE_PATH` in `.env`.
-2. Run `python -m makpa.cli.google_demo list-events --days 1`. The CLI prints
-   a consent URL and opens the browser.
+2. Run `python -m makpa.cli.google_demo login`. The CLI runs the real PKCE
+   browser flow (opens the consent URL, listens on the redirect port,
+   exchanges the code, caches tokens).
 3. On the Google consent screen, confirm the app name matches your Cloud
    project and the requested scopes are Calendar + Gmail only, then approve.
 4. The CLI prints cached events and `Google OAuth: cached` on the next run.
@@ -272,6 +278,25 @@ live GitHub (PAT) and live Google (OAuth) run when the user supplies
 credentials — see the manual OAuth guide above. Full transcripts for
 demo and free modes: `docs/DEMO_TRANSCRIPT.md`. Architecture:
 `docs/ARCHITECTURE.md`.
+
+## Web Frontend (Next.js 15 + FastAPI adapter)
+
+```bash
+# Terminal 1: thin adapter (no business logic, wraps the supervisor)
+PYTHONPATH=src ./.venv/Scripts/python.exe -m makpa.api.server
+# → http://127.0.0.1:8001, OpenAPI at /docs
+
+# Terminal 2: frontend (Turbopack dev, /api/* rewrites to :8001)
+cd apps/web
+pnpm install
+pnpm dev
+# → http://localhost:3000
+```
+
+Gates: `pnpm lint` (biome clean), `pnpm typecheck` (`tsc --noEmit` strict),
+`pnpm test` (vitest 19 passed), `pnpm build` (7 routes green).
+Adapter tests: `pytest tests/test_api_server.py -q` (5 passed).
+Design artifacts 1–7: `apps/web/docs/BUILD.md` (spec: `apps/web/docs/Frontend Build.md`).
 
 ## Project Structure
 
@@ -340,6 +365,13 @@ pytest tests/ -v
 make lint      # ruff
 make typecheck # mypy --strict
 ```
+
+### Terminal Output
+
+CLIs print a one-line `probing LLM...` note before the model probe (the
+probe waits on network calls and can take ~40s when a provider quota is
+exhausted), cap third-party SDK chatter at WARNING, and never print the
+banner border twice. Full SDK logs return with `MAKPA_VERBOSE=1`.
 
 ## Architecture
 

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import logging
-
 import typer
 
 from makpa.config import print_startup_banner
@@ -15,16 +13,16 @@ RAG_INDICATOR = "[RAG agent]"
 
 
 def _setup_logging() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    )
+    from makpa.utils.terminal import setup_logging
+
+    setup_logging()
 
 
 def _run_startup_probe() -> None:
     """Run the model-name probe; exit non-zero when it fails fast."""
     from makpa.llm import probe_llm
 
+    typer.echo(f"{RAG_INDICATOR} probing LLM (Gemini -> Groq -> mock)...")
     try:
         result = probe_llm()
     except RuntimeError as e:

@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 7, "column": 0}, "map": {"version":3,"sources":["file://D%3A/agents/LangGraph-Agent/apps/web/app/providers.tsx"],"sourcesContent":["\"use client\";\n\nimport { QueryClient, QueryClientProvider } from \"@tanstack/react-query\";\nimport { useState } from \"react\";\nimport type { ReactNode } from \"react\";\n\nexport function Providers({ children }: { children: ReactNode }) {\n\tconst [client] = useState(\n\t\t() =>\n\t\t\tnew QueryClient({\n\t\t\t\tdefaultOptions: { queries: { retry: 2, staleTime: 10_000 } },\n\t\t\t}),\n\t);\n\treturn <QueryClientProvider client={client}>{children}</QueryClientProvider>;\n}\n"],"names":[],"mappings":";;;;AAGA;AADA;AAAA;;;AAFA;;;AAMO,SAAS,UAAU,EAAE,QAAQ,EAA2B;;IAC9D,MAAM,CAAC,OAAO,GAAG,CAAA,GAAA,4QAAA,CAAA,WAAQ,AAAD;8BACvB,IACC,IAAI,0PAAA,CAAA,cAAW,CAAC;gBACf,gBAAgB;oBAAE,SAAS;wBAAE,OAAO;wBAAG,WAAW;oBAAO;gBAAE;YAC5D;;IAEF,qBAAO,4SAAC,0RAAA,CAAA,sBAAmB;QAAC,QAAQ;kBAAS;;;;;;AAC9C;GARgB;KAAA"}},
+    {"offset": {"line": 47, "column": 0}, "map": {"version":3,"sources":[],"names":[],"mappings":"A"}}]
+}

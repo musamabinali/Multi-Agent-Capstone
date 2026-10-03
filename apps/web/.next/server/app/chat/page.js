@@ -1,0 +1,12 @@
+const CHUNK_PUBLIC_PATH = "server/app/chat/page.js";
+const runtime = require("../../chunks/ssr/[turbopack]_runtime.js");
+runtime.loadChunk("server/chunks/ssr/1c6b9_next_dist_53cc7f._.js");
+runtime.loadChunk("server/chunks/ssr/[root of the server]__550d4a._.js");
+runtime.loadChunk("server/chunks/ssr/_e55c52._.js");
+runtime.loadChunk("server/chunks/ssr/styles_globals_824228.css");
+runtime.loadChunk("server/chunks/ssr/node_modules__pnpm_9e70db._.js");
+runtime.loadChunk("server/chunks/ssr/1c6b9_next_dist_client_components_forbidden-error_08b6e4.js");
+runtime.loadChunk("server/chunks/ssr/1c6b9_next_dist_client_components_unauthorized-error_a291cf.js");
+runtime.loadChunk("server/chunks/ssr/_ded3ef._.js");
+runtime.getOrInstantiateRuntimeModule("[project]/.next-internal/server/app/chat/page/actions.js [app-rsc] (ecmascript)", CHUNK_PUBLIC_PATH);
+module.exports = runtime.getOrInstantiateRuntimeModule("[project]/node_modules/.pnpm/next@15.1.6_@babel+core@7.2_cfb1502737cfe2ba051be860d32ee190/node_modules/next/dist/esm/build/templates/app-page.js?page=/chat/page { MODULE_0 => \"[project]/app/layout.tsx [app-rsc] (ecmascript, Next.js server component)\", MODULE_1 => \"[project]/node_modules/.pnpm/next@15.1.6_@babel+core@7.2_cfb1502737cfe2ba051be860d32ee190/node_modules/next/dist/client/components/not-found-error.js [app-rsc] (ecmascript, Next.js server component)\", MODULE_2 => \"[project]/node_modules/.pnpm/next@15.1.6_@babel+core@7.2_cfb1502737cfe2ba051be860d32ee190/node_modules/next/dist/client/components/forbidden-error.js [app-rsc] (ecmascript, Next.js server component)\", MODULE_3 => \"[project]/node_modules/.pnpm/next@15.1.6_@babel+core@7.2_cfb1502737cfe2ba051be860d32ee190/node_modules/next/dist/client/components/unauthorized-error.js [app-rsc] (ecmascript, Next.js server component)\", MODULE_4 => \"[project]/app/chat/page.tsx [app-rsc] (ecmascript, Next.js server component)\" } [app-rsc] (ecmascript)", CHUNK_PUBLIC_PATH).exports;

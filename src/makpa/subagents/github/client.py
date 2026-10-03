@@ -53,6 +53,92 @@ except Exception:  # pragma: no cover
     pass
 
 
+def _split_repo_slug(repo: str) -> tuple[str, str]:
+    """Split an ``owner/name`` slug (validated upstream by ``validate_repo``)."""
+    owner, _, name = str(repo).partition("/")
+    return owner, name
+
+
+def _translate_for_real(
+    name: str, arguments: dict[str, Any]
+) -> tuple[str, dict[str, Any]]:
+    """Map canonical (mock) tool names/args to the hosted GitHub MCP dialect.
+
+    The official remote server uses separate owner/repo args, ``perPage``
+    pagination, method-dispatched readers/writers, and different tool names.
+    Unknown names pass through unchanged so they fail loudly at lookup.
+    """
+    args = dict(arguments)
+    if name == "list_prs":
+        owner, repo = _split_repo_slug(args.pop("repo", "/"))
+        return "list_pull_requests", {
+            "owner": owner,
+            "repo": repo,
+            "state": args.get("state", "open"),
+            "perPage": args.get("limit", 10),
+        }
+    if name == "get_pr":
+        owner, repo = _split_repo_slug(args.pop("repo", "/"))
+        return "pull_request_read", {
+            "owner": owner,
+            "repo": repo,
+            "method": "get",
+            "pullNumber": args.get("number"),
+        }
+    if name == "list_issues":
+        owner, repo = _split_repo_slug(args.pop("repo", "/"))
+        real: dict[str, Any] = {
+            "owner": owner,
+            "repo": repo,
+            "perPage": args.get("limit", 10),
+        }
+        state = str(args.get("state", "open")).lower()
+        if state in ("open", "closed"):
+            # Remote enum is OPEN|CLOSED with no "all": omit for all.
+            real["state"] = state.upper()
+        if args.get("labels"):
+            real["labels"] = args["labels"]
+        return "list_issues", real
+    if name == "create_issue":
+        owner, repo = _split_repo_slug(args.pop("repo", "/"))
+        return "issue_write", {
+            "owner": owner,
+            "repo": repo,
+            "method": "create",
+            "title": args.get("title", ""),
+            "body": args.get("body", ""),
+            "labels": args.get("labels", []),
+        }
+    if name == "list_repos":
+        # No list endpoint remotely; an owner-scoped repo search is closest.
+        return "search_repositories", {
+            "query": f"user:{args.get('owner', '')}",
+            "perPage": args.get("limit", 10),
+        }
+    if name == "search_code":
+        query = str(args.get("query", ""))
+        if args.get("repo"):
+            query = f"{query} repo:{args['repo']}".strip()
+        return "search_code", {"query": query, "perPage": args.get("limit", 10)}
+    if name == "get_commits":
+        owner, repo = _split_repo_slug(args.pop("repo", "/"))
+        return "list_commits", {
+            "owner": owner,
+            "repo": repo,
+            "sha": args.get("branch", "main"),
+            "perPage": args.get("limit", 10),
+        }
+    if name == "read_file":
+        owner, repo = _split_repo_slug(args.pop("repo", "/"))
+        return "get_file_contents", {
+            "owner": owner,
+            "repo": repo,
+            "path": args.get("path", ""),
+            "ref": args.get("ref", "main"),
+        }
+    return name, args
+
+
 def _log_call(
     tool: str,
     duration_ms: int,
@@ -162,15 +248,22 @@ class GitHubMCPClient:
         retryer = self._retry_decorator()
 
         async def _attempt() -> dict[str, Any]:
+            lookup, call_args = (name, arguments)
+            if self._path == "real":
+                lookup, call_args = _translate_for_real(name, arguments)
             tools = await self.aget_tools()
-            matches = [t for t in tools if t.name == name]
+            matches = [t for t in tools if t.name == lookup]
             if not matches:
                 raise ValueError(f"Unknown GitHub MCP tool: {name}")
             raw = await asyncio.wait_for(
-                matches[0].ainvoke(arguments),
+                matches[0].ainvoke(call_args),
                 timeout=float(self._settings.mcp_tool_timeout_seconds),
             )
-            return _normalize_raw(raw)
+            result = _normalize_raw(raw)
+            # Hosted payloads carry no status envelope; default to ok so the
+            # graph's status aggregation keeps working.
+            result.setdefault("status", "ok")
+            return result
 
         try:
             result: dict[str, Any] = await retryer(_attempt)()

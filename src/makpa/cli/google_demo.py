@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -31,10 +30,9 @@ def _setup_logging() -> None:
                 reconfig(encoding="utf-8", errors="replace")
             except Exception:
                 pass
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    )
+    from makpa.utils.terminal import setup_logging
+
+    setup_logging()
 
 
 def _split_list(raw: str) -> list[str]:
@@ -47,6 +45,7 @@ def _startup() -> dict[str, str]:
     from makpa.llm import probe_llm
 
     print_startup_banner()
+    typer.echo(f"{CALENDAR_INDICATOR} probing LLM (Gemini -> Groq -> mock)...")
     try:
         result = probe_llm()
     except RuntimeError as e:
@@ -77,15 +76,33 @@ def _startup() -> dict[str, str]:
 
 
 def _exit_reauth() -> None:
-    """Print the reauthentication URL and exit with code 3."""
+    """Print reauth next steps and exit with code 3."""
     from makpa.google.oauth import build_authorization_url
 
-    typer.echo(f"{CALENDAR_INDICATOR} Google reauthentication required.", err=True)
+    typer.echo(
+        f"{CALENDAR_INDICATOR} Google reauthentication required (no cached tokens).",
+        err=True,
+    )
+    typer.echo(f"{CALENDAR_INDICATOR} 1. Run: python -m makpa.cli.google_demo login", err=True)
+    typer.echo(
+        f"{CALENDAR_INDICATOR} 2. Approve in the browser "
+        "(Advanced -> Go to <project> on the unverified-app screen).",
+        err=True,
+    )
+    typer.echo(f"{CALENDAR_INDICATOR} 3. Re-run your command.", err=True)
+    typer.echo(
+        f"{CALENDAR_INDICATOR} direct consent URL (the login command handles "
+        "PKCE for you; this URL alone is not enough):",
+        err=True,
+    )
     typer.echo(build_authorization_url("reauth-required"), err=True)
     raise typer.Exit(code=REAUTH_EXIT_CODE)
 
 
 def _boxed(title: str, lines: list[str]) -> None:
+    from makpa.utils.terminal import wrap_box_lines
+
+    lines = wrap_box_lines(lines)
     width = max([len(title)] + [len(line) for line in lines] + [10]) + 4
     border = "+" + "-" * (width - 2) + "+"
     typer.echo(border)
@@ -121,6 +138,48 @@ def _confirm_or_exit(title: str, lines: list[str], prompt: str) -> None:
     if not typer.confirm(prompt):
         typer.echo("Aborted.")
         raise typer.Exit(code=2)
+
+
+@app.command()  # type: ignore[untyped-decorator]
+def login() -> None:
+    """Run the Google OAuth browser flow and cache tokens.
+
+    Example: python -m makpa.cli.google_demo login
+    """
+    from makpa.google.oauth import ReauthRequiredError, run_browser_flow
+
+    _setup_logging()
+    print_startup_banner()
+    typer.echo(f"{CALENDAR_INDICATOR} opening browser for Google consent...")
+    try:
+        run_browser_flow()
+    except ReauthRequiredError as e:
+        typer.echo(f"{CALENDAR_INDICATOR} login could not start: {e}", err=True)
+        raise typer.Exit(code=REAUTH_EXIT_CODE)
+    except RuntimeError as e:
+        message = str(e)
+        typer.echo(f"{CALENDAR_INDICATOR} login failed: {message}", err=True)
+        if "invalid_grant" in message:
+            hint = (
+                "that approval is spent or belongs to another run: approvals "
+                "are single-use and bound to one run. Kill any stuck login, "
+                "start one fresh run, and approve the URL THAT run prints."
+            )
+        elif "redirect_uri_mismatch" in message:
+            hint = (
+                "register http://localhost:8080/callback in the OAuth "
+                "client's authorized redirect URIs, wait a few minutes, retry."
+            )
+        elif "invalid_client" in message:
+            hint = "check GOOGLE_CLIENT_SECRET matches this client (or blank it)."
+        else:
+            hint = (
+                "add your account under OAuth consent screen -> Test users, "
+                "then retry."
+            )
+        typer.echo(f"{CALENDAR_INDICATOR} hint: {hint}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(f"{CALENDAR_INDICATOR} Google OAuth cached. Re-run your command.")
 
 
 @app.command(name="list-events")  # type: ignore[untyped-decorator]

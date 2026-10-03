@@ -25,6 +25,122 @@ logger = logging.getLogger(__name__)
 TERMINAL_OK = ("ok", "empty", "rolled_back")
 
 
+def _as_list(value: Any) -> list[Any]:
+    return list(value) if isinstance(value, list) else []
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def extract_structured(agent: str, result: dict[str, Any]) -> dict[str, Any]:
+    """Extract typed ids from a sub-agent result (never from prose).
+
+    Reads ``citations`` for RAG and ``tool_results`` payloads for GitHub /
+    Google, so the frontend renders ids from data instead of regexing answers.
+    Always returns a dict (possibly empty); callers render "no structured
+    result" for the empty case.
+    """
+    if agent == "rag_agent":
+        citations = _as_list(result.get("citations"))
+        return {"citations": citations, "chunk_count": len(citations)}
+    tool_results = [r for r in _as_list(result.get("tool_results")) if isinstance(r, dict)]
+    if agent == "github_agent":
+        return _extract_github_structured(result, tool_results)
+    if agent == "google_agent":
+        return _extract_google_structured(tool_results)
+    return {}
+
+
+def _extract_github_structured(
+    result: dict[str, Any], tool_results: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Collect PR/issue/commit ids and the repo slug from GitHub tool results."""
+    pr_numbers: list[int] = []
+    issue_numbers: list[int] = []
+    commit_shas: list[str] = []
+    for item in tool_results:
+        for pr in _as_list(item.get("prs")):
+            number = _as_dict(pr).get("number")
+            if isinstance(number, int) and number not in pr_numbers:
+                pr_numbers.append(number)
+        number = _as_dict(item.get("pr")).get("number")
+        if isinstance(number, int) and number not in pr_numbers:
+            pr_numbers.append(number)
+        for issue in _as_list(item.get("issues")):
+            number = _as_dict(issue).get("number")
+            if isinstance(number, int) and number not in issue_numbers:
+                issue_numbers.append(number)
+        number = _as_dict(item.get("issue")).get("number")
+        if isinstance(number, int) and number not in issue_numbers:
+            issue_numbers.append(number)
+        for commit in _as_list(item.get("commits")):
+            sha = _as_dict(commit).get("sha")
+            if isinstance(sha, str) and sha and sha not in commit_shas:
+                commit_shas.append(sha)
+    repo = ""
+    for step in _as_list(result.get("plan")):
+        candidate = _as_dict(_as_dict(step).get("args")).get("repo")
+        if isinstance(candidate, str) and candidate:
+            # Plan args may carry trailing sentence punctuation
+            # ("octo-demo/hello-world."); the executed tool path already
+            # normalizes it, so strip it here for clean display.
+            repo = candidate.strip().rstrip(".,;:!?")
+            break
+    return {
+        "pr_numbers": pr_numbers,
+        "issue_numbers": issue_numbers,
+        "commit_shas": commit_shas,
+        "repo": repo,
+    }
+
+
+def _extract_google_structured(tool_results: list[dict[str, Any]]) -> dict[str, Any]:
+    """Collect event/message/draft ids and availability from Google tool results."""
+    event_ids: list[str] = []
+    event_id = ""
+    calendar_status = ""
+    message_id = ""
+    draft_id = ""
+    availability: dict[str, Any] = {}
+    for item in tool_results:
+        for event in _as_list(item.get("events")):
+            identifier = _as_dict(event).get("id")
+            if isinstance(identifier, str) and identifier and identifier not in event_ids:
+                event_ids.append(identifier)
+        event = _as_dict(item.get("event"))
+        if event.get("id"):
+            event_id = str(event["id"])
+            if event_id not in event_ids:
+                event_ids.append(event_id)
+            if event.get("status"):
+                calendar_status = str(event["status"])
+        draft = _as_dict(item.get("draft"))
+        if draft.get("id"):
+            draft_id = str(draft["id"])
+        if draft.get("message_id"):
+            message_id = str(draft["message_id"])
+        sent = _as_dict(item.get("sent"))
+        if sent.get("id"):
+            message_id = str(sent["id"])
+        message = _as_dict(item.get("message"))
+        if message.get("id") and not message_id:
+            message_id = str(message["id"])
+        if item.get("tool") == "calendar_check_availability":
+            availability = {
+                "free": bool(item.get("free", False)),
+                "partial": bool(item.get("partial", False)),
+            }
+    return {
+        "event_ids": event_ids,
+        "event_id": event_id,
+        "calendar_status": calendar_status,
+        "message_id": message_id,
+        "draft_id": draft_id,
+        "availability": availability,
+    }
+
+
 def _worker_update(agent: str, result: dict[str, Any]) -> dict[str, Any]:
     """Normalize one sub-agent result into state updates."""
     from makpa.utils.interrupts import detect_interrupt
@@ -42,6 +158,7 @@ def _worker_update(agent: str, result: dict[str, Any]) -> dict[str, Any]:
     }
     if agent == "rag_agent" and isinstance(result.get("citations"), list):
         summary["citations"] = result.get("citations", [])
+    summary["structured"] = extract_structured(agent, result)
     tool_results = result.get("tool_results")
     if isinstance(tool_results, list):
         summary["tools"] = [
@@ -338,5 +455,6 @@ def run_supervisor(question: str) -> dict[str, Any]:
 __all__ = [
     "aggregate_results",
     "create_supervisor_graph",
+    "extract_structured",
     "run_supervisor",
 ]

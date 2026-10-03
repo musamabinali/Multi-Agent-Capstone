@@ -140,6 +140,27 @@ def test_token_endpoint_errors():
     assert raised
 
 
+def test_token_endpoint_http_error_surfaces_body():
+    import urllib.error
+
+    from makpa.google import oauth as oauth_mod
+
+    err = urllib.error.HTTPError(
+        "https://oauth2.googleapis.com/token", 400, "Bad Request", {}, None
+    )
+    err.read = lambda: b'{"error": "invalid_grant", "error_description": "stale"}'
+    with (
+        patch("makpa.google.oauth.get_settings", return_value=_settings()),
+        patch("urllib.request.urlopen", side_effect=err),
+    ):
+        try:
+            oauth_mod.refresh_access_token("r")
+            raised = False
+        except RuntimeError as e:
+            raised = "400" in str(e) and "invalid_grant" in str(e)
+    assert raised
+
+
 def test_cache_round_trip_and_helpers(tmp_path):
     from makpa.google import oauth as oauth_mod
 

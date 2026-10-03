@@ -573,9 +573,142 @@
 
 ---
 
+### 2026-10-03T18:00:00Z — POST-GATE — Terminal UX Pass (Live Debugging Session)
+- **Trigger**: Live user session exposed five paper cuts: INFO firehose (httpx
+  per-request + SDK retry JSON walls), a ~40s silent probe stall (user Ctrl+C'd
+  thinking it hung), a doubled banner border, no `login` command (user ran the
+  OAuth flow via a pasted `python -c` one-liner), and an exit-3 stub consent URL
+  with a dummy PKCE challenge.
+- **Changed**:
+  - `src/makpa/utils/terminal.py` (new) — `setup_logging()` keeps root INFO,
+    caps httpx/httpcore/google_genai/google.api_core/google.auth/urllib3 at
+    WARNING, `MAKPA_VERBOSE=1` restores full logs; all four CLIs delegate
+    (signatures unchanged); `tests/test_terminal_logging.py` keeps the 98% gate
+  - `settings.py` banner — removed the duplicated trailing border (initial list
+    already ends with one; the extra `append` printed `+===+` twice every run)
+  - `google_demo login` — runs the real `run_browser_flow()` with exit 3/1
+    mapping and a Test-users hint on `access_denied`-class failures
+  - `_exit_reauth()` — numbered next steps pointing at `login`, stub URL kept
+    but labeled as insufficient alone
+  - `probing LLM (Gemini -> Groq -> mock)...` note in all four `_startup` paths
+  - `tests/test_google_cli.py` — autouse fixture forces `GOOGLE_MCP_MODE=mock`
+    + clears the settings cache (a developer `.env` with local mode reddened
+    7 CLI tests via the exit-3 path; ambient-env dependence, not a regression)
+  - `README.md` — manual OAuth guide step 2 uses `login`; Terminal Output section
+- **Validated**: 28 passed (terminal + google CLI + agent CLI); ruff clean;
+  mypy strict clean (63 files); live `list-events` shows single border, probe
+  note, no httpx/retry INFO lines, numbered reauth steps, exit 3
+- **Blocker**: None (pre-existing `test_settings_vector_and_github_paths`
+  ambient-env failure unchanged; user's Gemini 429 quota is external)
+- **Next**: None — UX pass complete; user still owes one `login` approval + `cached` re-run
+
+---
+
+### 2026-10-03T18:15:00Z — POST-GATE — OAuth 400 Now Names Itself
+- **Trigger**: Live `login` run failed at token exchange with `HTTP Error 400:
+  Bad Request` and no cause — `_post_token_endpoint` discarded Google's
+  response body, which carries the exact error (`invalid_grant` /
+  `redirect_uri_mismatch` / `invalid_client`).
+- **Changed**:
+  - `oauth.py:_post_token_endpoint` — `HTTPError` split out of the generic
+    branch; message now `Google token endpoint error {code}: {body}`
+    (existing "unreachable"/"invalid JSON"/"token error" paths untouched)
+  - `google_demo login` — hint branches on the named error (single-use
+    approval vs redirect URI vs secret vs Test users)
+  - Tests: HTTPError body-surfacing case + `invalid_grant` hint case
+- **Validated**: 40 passed (oauth + google CLI/client + terminal); ruff clean;
+  mypy strict clean (63 files)
+- **Blocker**: None — likely cause on the user side is a stale approval
+  (code from an older run) or stale `GOOGLE_CLIENT_SECRET`; next `login`
+  will print which one
+- **Next**: User kills stuck one-liner, runs one fresh `login`, approves the
+  URL that run prints
+
+---
+
+### 2026-10-03T19:30:00Z — POST-GATE — First Live Google Call (FLAG-B Closed)
+- **Run**: `python -m makpa.cli.google_demo list-events --days 1` with
+  `GOOGLE_MCP_MODE=local` and a fresh Desktop-client PKCE handshake
+- **Observed**: `Google OAuth: cached`, `paths: calendar=local gmail=local`,
+  `calendar_list_events` `status: ok` on path `local` (8.8s, real API);
+  `events: []` is a genuine empty primary calendar, not a mock (mock
+  fixtures return `evt-001`/`evt-002`)
+- **Path to green**: corrected GitHub MCP default URL (unrelated endpoint,
+  same session) → `login` command → Desktop client, test-user approval →
+  cross-wired-approval 400 diagnosed via surfaced response body → fresh
+  single-listener `login` exchanged first try
+- **Still open**: Gemini 429 free-tier quota (~9.5h to reset); Groq fallback
+  covering all LLM calls meanwhile
+- **Next**: Composite two-gate scheduling against the live calendar; record
+  transcript in `docs/DEMO_TRANSCRIPT.md`
+
+---
+
+### 2026-10-03T20:20:00Z — POST-GATE — Real GitHub Tool Dialect (FLAG-1 Closed)
+- **Trigger**: Corrected MCP URL connected (46 tools cached), but every call
+  failed `Unknown GitHub MCP tool: list_prs` — the mock STDIO server and the
+  hosted server speak different dialects (names, owner/repo split,
+  perPage, method-dispatched readers/writers, OPEN|CLOSED enums).
+- **Changed** (`src/makpa/subagents/github/client.py`):
+  - `_translate_for_real()` maps all 8 canonical tools: `list_prs`→
+    `list_pull_requests`, `get_pr`→`pull_request_read(method=get)`,
+    `list_issues` (drops state when `all`), `create_issue`→`issue_write
+    (method=create)`, `list_repos`→`search_repositories(user:)`,
+    `search_code` (appends `repo:` qualifier), `get_commits`→`list_commits
+    (sha=branch)`, `read_file`→`get_file_contents`; applied only on the
+    `real` path, mock path byte-identical
+  - Bare hosted payloads get `status: ok` default so graph aggregation holds
+- **Validated**: 18 passed (client + tools, incl. 3 new translation tests);
+  ruff + mypy clean; live `octocat/Hello-World` returns real PRs (9.5KB);
+  fictional `octo-demo/hello-world` honestly 404s (mock-only fixture)
+- **Blocker**: None (Gemini now 403 PERMISSION_DENIED, not just 429 — Groq
+  carries all inference; blank the key to skip the probe stall)
+- **Next**: User re-runs the original `ask` against a real repo
+
+---
+
+### 2026-10-03T20:25:00Z — POST-GATE — Full Ask Loop Verified Live
+- **Run**: `github_demo ask "List open pull requests in octo-demo/hello-world"`
+  on the real path — probe → plan → translated `list_prs` (`status: ok`,
+  8.7s) → synthesize → honest `No open pull requests found (404 Not Found)`
+  with the verbatim API error attached
+- **Changed**: `mcp` added to terminal `QUIET_LOGGERS` (session-ID /
+  protocol / reconnect INFO spam gone; warnings+errors still surface)
+- **Validated**: 14 passed (terminal); ruff + mypy clean
+- **Next**: Live composite scheduling run against the real calendar
+
+---
+
 ### 2026-10-01T00:47:00Z — FLAG-A — Live End-to-End Path Verified (Groq)
 - **Attempted**: Close live-verification debt with at least one genuinely live path instead of deferring again
 - **Changed**: None (verification run; evidence recorded here)
 - **Validated**: `MAKPA_MODE=free python -m makpa.cli.rag_demo ask "What does the sample PDF say about implementation details?"` → EXIT 0 with live Groq inference (`llm: groq (qwen/qwen3.8-27b)`), 5 chunks retrieved, grounded answer with 5 citations. Raw answer: "The sample PDF states that sections expand on chapter topics with concrete implementation detail, operational guidance, and worked examples drawn from production deployments. Readers are advised to pay attention to configuration defaults, failure modes, and observability hooks that make the system debuggable under load. Additionally, each subsection closes with a checklist that teams can adopt directly in code review. Citations: [sample.pdf, p.7, 36], [sample.pdf, p.6, 32], [sample.pdf, p.6, 31], [sample.pdf, p.11, 56], [sample.pdf, p.14, 73]"
 - **Blocker**: None. Live GitHub (PAT) and live Google (OAuth) still require user-supplied credentials; exact steps documented in README. The `live` mode stays because the downgrade chain + credential-gated paths are real, and at least one live path (metered LLM inference) is now proven end to end
 - **Next**: Manual OAuth guide (FLAG-B)
+
+---
+
+### 2026-10-03T00:00:00Z — WEB-01 — Frontend + Thin API Adapter Built
+- **Attempted**: Build the production-grade web frontend per `apps/web/docs/Frontend Build.md` without touching backend business logic
+- **Changed**:
+  - `src/makpa/api/server.py` + `src/makpa/api/__init__.py` — FastAPI thin adapter (threads/invoke/stream/resume/health/ingest, SSE `routing/agent_start/agent_token/agent_tool/agent_end/interrupt/aggregate/error/done`, deterministic `{prefix}-web-{NNNN}` threads, shared MemorySaver graph)
+  - `apps/web/` — Next.js 15 + React 19 + TS strict + Tailwind v4 + Zustand + TanStack Query + SSE hook; shell/chat/modals/ui components; settings/health pages; vitest + RTL + Playwright scaffolding; 7 design artifacts in `apps/web/docs/BUILD.md`
+  - `tests/test_api_server.py` — 5 adapter contract tests; `requirements.txt` + `pyproject.toml` gain `fastapi`/`uvicorn`; `README.md` web section
+- **Validated**: adapter `5 passed`; `ruff` + `mypy --strict` clean on `src/makpa/api`; frontend `biome` clean (50 files), `tsc --noEmit` clean, `vitest` 19 passed, `next build` 7 routes green; `/api/health` live-checked (mode/llm/vector/github/google/oauth)
+- **Blocker**: `eslint-config-next` flat patch broken under pnpm/Node 22 → Biome is the enforced lint gate (`eslint.ignoreDuringBuilds`, types still fail builds); `jsdom@^25` unresolvable → pinned `^24.1.3`
+- **Next**: Playwright e2e against live dev server + backend; axe a11y audit
+
+---
+
+### 2026-10-03T00:00:00Z — WEB-02 — Frontend Review (5 fixes, 3 deferred)
+- **Attempted**: Audit the WEB-01 build against `apps/web/docs/Frontend Build.md` §§1/9/11/12; fix genuine issues
+- **Changed**:
+  - `src/makpa/api/server.py::_interrupt_kind` — kind derives from `action` → `gate` → first `payload_preview[].tool` → `"confirm"` (single gates previously collapsed to `"confirm"`); `tests/test_api_server.py` gains kind-derivation test
+  - `components/modals/ConfirmationModal.tsx` — `previewTools()` titles (`Confirm calendar event/email send/GitHub write`) + payload-based rollback detection; `tests/component/InterruptKind.test.tsx` (3 tests)
+  - `lib/types/index.ts` (`payload: Record<string, unknown>`) + `useChatStream` cast narrowing; `app/chat/[threadId]/page.tsx` retry re-sends last user message (was literal `"retry"`)
+  - `lib/hooks/useHealth.ts` + `lib/hooks/useThread.ts` added per §10.1; all pages migrated; optional `/docs` hub added; `biome.json` ignores `.next/**`
+  - `tests/e2e/flows.spec.ts` rewritten with `page.route` mocks (empty-state/mode honesty, gate-2 rollback `{"rollback":true}`, decline `{"confirm":false}`, health panel)
+  - `apps/web/docs/REVIEW.md` — full audit record (R-01…R-05 fixed, D-01…D-03 deferred)
+- **Validated**: ruff + mypy clean; adapter `6 passed`; biome clean (54 files); tsc clean; vitest `22 passed`; `next build` 8 routes green
+- **Blocker**: D-01 axe audit, D-02 live-server Playwright pass, D-03 structured-ids-through-instead-of-prose — all recorded in REVIEW.md, none blocking internal use
+- **Next**: D-02 live e2e + D-01 axe before any external release

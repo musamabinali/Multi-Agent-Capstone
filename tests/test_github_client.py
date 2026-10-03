@@ -172,6 +172,94 @@ def test_normalize_raw_variants():
     assert _normalize_raw(42)["text"] == "42"
 
 
+def test_translate_for_real_names_and_args():
+    from makpa.subagents.github.client import _translate_for_real
+
+    name, args = _translate_for_real(
+        "list_prs", {"repo": "o/r", "state": "open", "limit": 5}
+    )
+    assert (name, args) == (
+        "list_pull_requests",
+        {"owner": "o", "repo": "r", "state": "open", "perPage": 5},
+    )
+
+    name, args = _translate_for_real("get_pr", {"repo": "o/r", "number": 7})
+    assert (name, args) == (
+        "pull_request_read",
+        {"owner": "o", "repo": "r", "method": "get", "pullNumber": 7},
+    )
+
+    name, args = _translate_for_real(
+        "list_issues", {"repo": "o/r", "state": "all", "labels": ["bug"], "limit": 3}
+    )
+    assert name == "list_issues"
+    assert args == {"owner": "o", "repo": "r", "perPage": 3, "labels": ["bug"]}
+
+    name, args = _translate_for_real(
+        "list_issues", {"repo": "o/r", "state": "closed", "labels": [], "limit": 3}
+    )
+    assert args["state"] == "CLOSED" and "labels" not in args
+
+    name, args = _translate_for_real(
+        "create_issue", {"repo": "o/r", "title": "t", "body": "b", "labels": []}
+    )
+    assert (name, args["method"], args["title"]) == ("issue_write", "create", "t")
+
+    name, args = _translate_for_real("list_repos", {"owner": "octo", "limit": 10})
+    assert (name, args) == (
+        "search_repositories",
+        {"query": "user:octo", "perPage": 10},
+    )
+
+    name, args = _translate_for_real(
+        "search_code", {"query": "q", "repo": "o/r", "limit": 4}
+    )
+    assert (name, args) == ("search_code", {"query": "q repo:o/r", "perPage": 4})
+
+    name, args = _translate_for_real(
+        "get_commits", {"repo": "o/r", "branch": "dev", "limit": 2}
+    )
+    assert (name, args) == (
+        "list_commits",
+        {"owner": "o", "repo": "r", "sha": "dev", "perPage": 2},
+    )
+
+    name, args = _translate_for_real(
+        "read_file", {"repo": "o/r", "path": "f.py", "ref": "main"}
+    )
+    assert (name, args) == (
+        "get_file_contents",
+        {"owner": "o", "repo": "r", "path": "f.py", "ref": "main"},
+    )
+
+    assert _translate_for_real("mystery", {"a": 1}) == ("mystery", {"a": 1})
+
+
+def test_acall_tool_translates_on_real_path():
+    from makpa.subagents.github.client import GitHubMCPClient
+
+    client = _client("real", "pat")
+    tool = MagicMock()
+    tool.name = "list_pull_requests"
+    tool.ainvoke = AsyncMock(return_value=[{"number": 7, "title": "T"}])
+    with patch.object(
+        GitHubMCPClient, "aget_tools", AsyncMock(return_value=[tool])
+    ):
+        out = asyncio.run(client.acall_tool("list_prs", {"repo": "o/r"}))
+    assert out["status"] == "ok" and out["tool"] == "list_prs"
+    sent = tool.ainvoke.await_args[0][0]
+    assert sent == {"owner": "o", "repo": "r", "state": "open", "perPage": 10}
+
+
+def test_acall_tool_real_path_unknown_still_errors():
+    from makpa.subagents.github.client import GitHubMCPClient
+
+    client = _client("real", "pat")
+    with patch.object(GitHubMCPClient, "aget_tools", AsyncMock(return_value=[])):
+        out = asyncio.run(client.acall_tool("nope", {}))
+    assert out["status"] == "error" and "Unknown" in out["message"]
+
+
 def test_singleton_accessors():
     from makpa.subagents.github import client as client_mod
 

@@ -109,7 +109,8 @@ class Settings(BaseSettings):  # type: ignore[misc]
     # GitHub MCP
     github_mcp_pat: str | None = Field(default=None, validation_alias="GITHUB_MCP_PAT")
     github_mcp_url: str = Field(
-        default="https://api.github.com/mcp", validation_alias="GITHUB_MCP_URL"
+        default="https://api.githubcopilot.com/mcp/",
+        validation_alias="GITHUB_MCP_URL",
     )
     mcp_tool_timeout_seconds: int = Field(
         default=30, validation_alias="MCP_TOOL_TIMEOUT_SECONDS"
@@ -468,8 +469,6 @@ def print_startup_banner() -> None:
     if settings.resolved_mode == Mode.LIVE:
         note = "Note: live = live LLM; MCP mocked unless credentials present"
         lines.insert(-1, "|  " + note.ljust(71) + " |")
-
-    lines.append("+==============================================================================+")
 
     for line in lines:
         print(line)

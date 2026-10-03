@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 import typer
@@ -25,10 +24,9 @@ def _setup_logging() -> None:
                 reconfig(encoding="utf-8", errors="replace")
             except Exception:
                 pass
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    )
+    from makpa.utils.terminal import setup_logging
+
+    setup_logging()
 
 
 def _startup() -> None:
@@ -36,6 +34,7 @@ def _startup() -> None:
     from makpa.llm import probe_llm
 
     print_startup_banner()
+    typer.echo(f"{GITHUB_INDICATOR} probing LLM (Gemini -> Groq -> mock)...")
     try:
         result = probe_llm()
     except RuntimeError as e:
@@ -51,6 +50,9 @@ def _startup() -> None:
 
 
 def _boxed(title: str, lines: list[str]) -> None:
+    from makpa.utils.terminal import wrap_box_lines
+
+    lines = wrap_box_lines(lines)
     width = max([len(title)] + [len(line) for line in lines] + [10]) + 4
     border = "+" + "-" * (width - 2) + "+"
     typer.echo(border)

@@ -14,6 +14,7 @@ import logging
 import os
 import secrets
 import threading
+import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
@@ -84,6 +85,14 @@ def _post_token_endpoint(payload: dict[str, str]) -> dict[str, Any]:
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
             raw = response.read().decode()
+    except urllib.error.HTTPError as e:
+        try:
+            detail = e.read().decode()
+        except Exception:
+            detail = ""
+        raise RuntimeError(
+            f"Google token endpoint error {e.code}: {detail or e}"
+        ) from e
     except Exception as e:
         raise RuntimeError(f"Google token endpoint unreachable: {e}") from e
     try:
@@ -156,7 +165,7 @@ def save_token_cache(data: dict[str, Any]) -> None:
         os.chmod(path, 0o600)
     except OSError:
         logger.warning("Could not enforce 0600 on token cache")
-    logger.info("Saved Google token cache (scopes=%d)", len(str(data.get("scope", ""))))
+    logger.info("Saved Google token cache (scopes=%d)", len(cached_scopes(data)))
 
 
 def normalize_cache(
