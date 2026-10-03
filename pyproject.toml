@@ -1,0 +1,76 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "makpa"
+version = "0.1.0"
+description = "MAKPA - LangGraph Multi-Agent Capstone"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "langchain>=0.3.0",
+    "langgraph>=0.2.0",
+    "langsmith>=0.1.0",
+    "langchain-core>=0.3.0",
+    "langchain-community>=0.3.0",
+    "langchain-google-genai>=2.0.0",
+    "langchain-groq>=0.2.0",
+    "mcp>=1.0.0",
+    "langchain-mcp-adapters>=0.1.0",
+    "pinecone>=3.0.0",
+    "chromadb>=0.5.0",
+    "qdrant-client>=1.8.0",
+    "sentence-transformers>=3.0.0",
+    "langchain-huggingface>=0.1.0",
+    "google-api-python-client>=2.100.0",
+    "google-auth>=2.25.0",
+    "google-auth-oauthlib>=1.1.0",
+    "google-auth-httplib2>=0.1.0",
+    "pydantic>=2.8.0",
+    "pydantic-settings>=2.3.0",
+    "python-dotenv>=1.0.0",
+    "rich>=13.7.0",
+    "typer>=0.9.0",
+    "structlog>=24.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-mock>=3.12.0",
+    "mypy>=1.9.0",
+    "types-requests>=2.31.0",
+    "ruff>=0.5.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["makpa*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "W"]
+ignore = []
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_return_any = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+no_implicit_optional = true
+namespace_packages = true
+explicit_package_bases = true
+exclude = ["\\.venv", ".*site-packages.*"]
+
+[[tool.mypy.overrides]]
+module = "numpy.*"
+ignore_errors = true

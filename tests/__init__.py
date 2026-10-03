@@ -1,0 +1,1 @@
+"""MAKPA test suite."""
