@@ -268,7 +268,7 @@ event: routing       data: {"agents": ["rag_agent","github_agent"], "reasoning":
 event: agent_start   data: {"agent": "rag_agent", "started_at": "..."}
 event: agent_token   data: {"agent": "rag_agent", "delta": "The document "}
 event: agent_tool    data: {"agent": "github_agent", "tool": "github_list_prs", "status": "ok"}
-event: agent_end     data: {"agent": "rag_agent", "status": "ok", "duration_ms": 2100, "citations": [...]}
+event: agent_end     data: {"agent": "rag_agent", "status": "ok", "duration_ms": 2100, "citations": [...], "structured": {"citations": [...], "chunk_count": 5}}
 event: interrupt     data: {"agent": "google_agent", "kind": "calendar_create", "payload": {...}}
 event: aggregate     data: {"status": "ok", "duration_ms": 2400}
 event: error         data: {"agent": "github_agent", "message": "...", "retryable": true}
@@ -276,6 +276,8 @@ event: done          data: {}
 ```
 
 Honest-streaming assumption (stated inline in `server.py`): the supervisor has no per-token LLM streaming, so `agent_token` deltas chunk the final per-agent answer at 400 chars; `agent_end` + the post-stream `GET /api/threads/{id}` reconcile authoritative citations/ids. Frontend handles unknown event types by ignoring them (`isKnownSSEEvent` gate in `useChatStream`).
+
+`structured` (web gate, D1): `agent_end` carries typed ids threaded from each sub-agent's `tool_results` via `supervisor/graph.py::extract_structured` — RAG `{citations, chunk_count}`, GitHub `{pr_numbers, issue_numbers, commit_shas, repo}`, Google `{event_ids, event_id, calendar_status, message_id, draft_id, availability}`. `StructuredResultTable` reads only `structured` and renders `no structured result` when absent — no regex over prose anywhere (removed entirely).
 
 ### 6.3 Client state
 
@@ -328,7 +330,7 @@ apps/web/
 ├── app/
 │   ├── layout.tsx / providers.tsx / page.tsx   // → /chat
 │   ├── chat/page.tsx / chat/[threadId]/page.tsx
-│   ├── settings/page.tsx / health/page.tsx
+│   ├── settings/page.tsx / health/page.tsx / docs/page.tsx
 ├── components/
 │   ├── shell/  AppShell, Sidebar, ModePill, DowngradeBanner
 │   ├── chat/   ChatView, AgentMessageCard, CitationChips, CitationDrawer,
@@ -340,15 +342,20 @@ apps/web/
 │   ├── api/client.ts        // typed fetch clients
 │   ├── sse/parser.ts        // SSE parser + splitSSEBuffer
 │   ├── stores/              // thread, ui, settings (zustand)
-│   ├── hooks/useChatStream.ts
+│   ├── hooks/              // useChatStream, useHealth, useThread
 │   ├── types/index.ts       // strict shared types, no any
 │   └── utils/
-├── styles/globals.css       // Tailwind v4 + tokens
-├── tests/unit|component|e2e
-├── next.config.ts / tsconfig.json / vitest.config.ts / playwright.config.ts
+├── styles/globals.css       // Tailwind v4 + tokens (+ AA-safe *-strong)
+├── tests/unit|component|e2e|a11y
+├── next.config.ts / tsconfig.json / vitest.config.ts
+├── playwright.config.ts / playwright.a11y.config.ts
 └── README.md
 src/makpa/api/server.py      // FastAPI adapter (backend half of §9.1)
-tests/test_api_server.py     // adapter contract tests
+src/makpa/supervisor/graph.py  // extract_structured (structured ids)
+src/makpa/mcp_servers/google_calendar/mock.py  // file-backed mock store
+scripts/serve_web.py         // deterministic live-server harness (mock stack)
+tests/test_api_server.py     // adapter contract tests (6 passed)
+tests/test_api_parity.py     // parity tests incl. structured per agent (9 passed)
 ```
 
 ### 7.2 Implementation order (built in one pass, verified per slice)

@@ -41,6 +41,54 @@ MOCK_EVENTS: list[dict[str, Any]] = [
 ]
 
 
+def _store_path() -> str:
+    """JSON file backing mock events across STDIO subprocesses.
+
+    Each MCP tool call may spawn a fresh server subprocess, so in-memory
+    fixtures alone cannot preserve created events for later update/delete
+    (e.g. gate-2 rollback). The file holds fixture copies plus upserts.
+    """
+    import os
+
+    try:
+        from makpa.config import get_settings
+
+        data_dir = os.path.dirname(get_settings().sample_pdf_path)
+    except Exception:
+        data_dir = "./data"
+    return os.path.join(data_dir, "mock_calendar.json")
+
+
+def _load_events() -> list[dict[str, Any]]:
+    """Load events: persisted store if present, else fixture copies."""
+    path = _store_path()
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+        if isinstance(data, list):
+            events = [dict(e) for e in data if isinstance(e, dict)]
+            if events:
+                return events
+    except (OSError, ValueError):
+        pass
+    return [dict(e) for e in MOCK_EVENTS]
+
+
+def _save_events(events: list[dict[str, Any]]) -> None:
+    """Persist events atomically (tmp + rename)."""
+    import os
+
+    path = _store_path()
+    try:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        tmp_path = path + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8") as handle:
+            json.dump(events, handle)
+        os.replace(tmp_path, path)
+    except OSError as e:
+        logger.warning("mock calendar store write failed: %s", e)
+
+
 def handle_mock_calendar_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     """Execute a mock Calendar tool call."""
     if name not in CALENDAR_TOOL_NAMES:
@@ -54,7 +102,7 @@ def handle_mock_calendar_tool(name: str, arguments: dict[str, Any]) -> dict[str,
         except ValueError as e:
             return {"status": "error", "message": str(e)}
         in_window = []
-        for event in MOCK_EVENTS:
+        for event in _load_events():
             start = parse_iso_utc(str(event["start"]))
             if window_start <= start <= window_end:
                 in_window.append(event)
@@ -82,9 +130,11 @@ def handle_mock_calendar_tool(name: str, arguments: dict[str, Any]) -> dict[str,
             "status": "confirmed",
             "mock": True,
         }
-        # Persist so later update/delete (e.g. gate-2 rollback) finds the event.
-        if not any(e["id"] == created["id"] for e in MOCK_EVENTS):
-            MOCK_EVENTS.append(created)
+        # Upsert into the file-backed store so later update/delete calls
+        # (e.g. gate-2 rollback) find the event across subprocesses.
+        events = [e for e in _load_events() if e.get("id") != created["id"]]
+        events.append(created)
+        _save_events(events)
         return {"status": "ok", "event": dict(created)}
     if name == "calendar_check_availability":
         if not arguments.get("time_min") or not arguments.get("time_max"):
@@ -95,7 +145,7 @@ def handle_mock_calendar_tool(name: str, arguments: dict[str, Any]) -> dict[str,
         except ValueError as e:
             return {"status": "error", "message": str(e)}
         busy = []
-        for event in MOCK_EVENTS:
+        for event in _load_events():
             event_start = parse_iso_utc(str(event["start"]))
             event_end = parse_iso_utc(str(event["end"]))
             if event_start < window_end and window_start < event_end:
@@ -108,8 +158,9 @@ def handle_mock_calendar_tool(name: str, arguments: dict[str, Any]) -> dict[str,
     if name == "calendar_update_event":
         if not arguments.get("event_id"):
             return {"status": "error", "message": "event_id is required"}
+        events = _load_events()
         target = next(
-            (e for e in MOCK_EVENTS if e["id"] == arguments["event_id"]), None
+            (e for e in events if e["id"] == arguments["event_id"]), None
         )
         if target is None:
             return {"status": "error", "message": f"event not found: {arguments['event_id']}"}
@@ -119,6 +170,7 @@ def handle_mock_calendar_tool(name: str, arguments: dict[str, Any]) -> dict[str,
         if arguments.get("status"):
             updated["status"] = arguments["status"]
         updated["mock"] = True
+        _save_events([updated if e["id"] == updated["id"] else e for e in events])
         return {"status": "ok", "event": updated}
     return {"status": "error", "message": f"Unhandled tool: {name}"}  # pragma: no cover
 

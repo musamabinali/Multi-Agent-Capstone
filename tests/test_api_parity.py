@@ -88,10 +88,10 @@ def test_mock_calendar_create_then_update_for_rollback():
         assert updated["status"] == "ok"
         assert updated["event"]["status"] == "cancelled"
     finally:
-        # Keep the shared fixture pristine for other tests.
-        cal_mock.MOCK_EVENTS[:] = [
-            e for e in cal_mock.MOCK_EVENTS if e["id"] != "evt-mock-100"
-        ]
+        # Keep the file-backed mock store pristine for other tests.
+        cal_mock._save_events(
+            [e for e in cal_mock._load_events() if e.get("id") != "evt-mock-100"]
+        )
 
 
 def test_worker_update_carries_structured():

@@ -150,6 +150,103 @@ def test_composite_check_error_and_routes():
     assert g.route_after_check(busy_results) == "synthesize"
 
 
+def test_execute_injects_event_link_into_followup_email():
+    from makpa.subagents.google import graph as g
+
+    fakes = _fake_tools()
+    with patch.dict(g.TOOLS_BY_NAME, fakes, clear=False):
+        out = g.execute_node(
+            {
+                "plan": [
+                    {
+                        "tool": "calendar_create_event",
+                        "args": {"summary": "S", "start": "a", "end": "b"},
+                    },
+                    {
+                        "tool": "gmail_send_message",
+                        "args": {"to": ["a@x.com"], "subject": "S", "body": "Hi"},
+                    },
+                ],
+                "confirmed": True,
+            }
+        )
+    sent_args = fakes["gmail_send_message"].invoke.call_args[0][0]
+    assert "http://cal/evt-1" in sent_args["body"] and sent_args["body"].startswith("Hi")
+    results = out["tool_results"]
+    assert results[1].get("link_injected") is True
+    assert out["status"] == "ok"
+
+
+def test_execute_skips_link_injection_without_event_link():
+    from makpa.subagents.google import graph as g
+
+    # Send-only plan: body untouched.
+    fakes = _fake_tools()
+    with patch.dict(g.TOOLS_BY_NAME, fakes, clear=False):
+        g.execute_node(
+            {
+                "plan": [
+                    {
+                        "tool": "gmail_send_message",
+                        "args": {"to": ["a@x.com"], "subject": "S", "body": "Hi"},
+                    }
+                ],
+                "confirmed": True,
+            }
+        )
+    assert fakes["gmail_send_message"].invoke.call_args[0][0]["body"] == "Hi"
+
+    # Body already carries a link: untouched.
+    fakes = _fake_tools()
+    with patch.dict(g.TOOLS_BY_NAME, fakes, clear=False):
+        g.execute_node(
+            {
+                "plan": [
+                    {
+                        "tool": "calendar_create_event",
+                        "args": {"summary": "S", "start": "a", "end": "b"},
+                    },
+                    {
+                        "tool": "gmail_send_message",
+                        "args": {
+                            "to": ["a@x.com"],
+                            "subject": "S",
+                            "body": "See http://other/x",
+                        },
+                    },
+                ],
+                "confirmed": True,
+            }
+        )
+    sent = fakes["gmail_send_message"].invoke.call_args[0][0]["body"]
+    assert sent == "See http://other/x"
+
+    # Failed create: no link to inject.
+    failed = _fake_tools()
+    failed["calendar_create_event"].invoke.return_value = {
+        "status": "error",
+        "message": "down",
+    }
+    with patch.dict(g.TOOLS_BY_NAME, failed, clear=False):
+        out = g.execute_node(
+            {
+                "plan": [
+                    {
+                        "tool": "calendar_create_event",
+                        "args": {"summary": "S", "start": "a", "end": "b"},
+                    },
+                    {
+                        "tool": "gmail_send_message",
+                        "args": {"to": ["a@x.com"], "subject": "S", "body": "Hi"},
+                    },
+                ],
+                "confirmed": True,
+            }
+        )
+    assert failed["gmail_send_message"].invoke.call_args[0][0]["body"] == "Hi"
+    assert "link_injected" not in out["tool_results"][1]
+
+
 def test_confirm_event_and_email_nodes():
     from makpa.subagents.google import graph as g
 

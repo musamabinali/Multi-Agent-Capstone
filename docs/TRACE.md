@@ -704,6 +704,43 @@
 
 ---
 
+### 2026-10-03T20:52:00Z — POST-GATE — Composite Fully Green (With Duplicates)
+- **Run 3** (same ask, against the warning): event `2holbc16kd6lsslbqrc26fok1o`
+  created (confirmed) + email `1a1027582331ab8c` sent — both boundary fixes
+  proven live in one run (paraphrased `title`/`start_time`/`end_time`
+  accepted via `AliasChoices`, bare-string `to` coerced)
+- **Consequence as predicted**: duplicate state — 2 events (`mfil5...` from
+  run 1 + `2holb...` from run 3) for the same slot, 2 near-identical emails
+  (`1a1026c4...` + `1a102758...`). No CLI delete command exists; cleanup is
+  manual in Google Calendar UI
+- **Next**: User deletes one duplicate event; composite flow declared done
+
+---
+
+### 2026-10-03T21:00:00Z — POST-GATE — Event Link Auto-Appended to Email
+- **Ask**: "can we send created meeting calendar link in email?"
+- **Finding**: the heuristic composite path already does
+  (`composite_plan_email_node` builds `Link: <html_link>`), but the user's
+  phrasing ("Schedule 'Project Sync' with ...", no meeting/call/event noun)
+  missed `is_composite_request` and took the LLM single-plan path, which
+  never chains outputs. Rerouting into composite was rejected: with an
+  external attendee under `own_only`, the availability gate would refuse
+  auto-create — the opposite of what the user wants.
+- **Changed** (`execute_node`): after a successful `calendar_create_event`,
+  a later `gmail_send_message` with no link in the body gets the event's
+  `html_link` appended (`Join: <link>`) and `link_injected: true` recorded;
+  skipped without a created link or when the body already has one.
+  Planner prompt now forbids inventing calendar URLs (link comes free).
+- **Gate honesty**: preview still shows the pre-link body (link doesn't exist
+  yet); only the approved event's own URL is ever added, and the sent result
+  + final answer state the injection. Caveat recorded, not hidden.
+- **Validated**: 26 passed (composite incl. 2 new injection tests + CLI +
+  coercion); ruff + mypy clean
+- **Next**: Future single-plan schedule+email runs carry the link; the two
+  already-sent emails cannot be retrofitted (send link manually if wanted)
+
+---
+
 ### 2026-10-01T00:47:00Z — FLAG-A — Live End-to-End Path Verified (Groq)
 - **Attempted**: Close live-verification debt with at least one genuinely live path instead of deferring again
 - **Changed**: None (verification run; evidence recorded here)

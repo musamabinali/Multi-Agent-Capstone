@@ -143,7 +143,8 @@ def _llm_plan(question: str) -> tuple[str, list[dict[str, Any]], str] | None:
         '{"service": "calendar|gmail|both", "action": name, '
         '"plan": [{"tool": name, "args": {...}}]}.\n'
         "Copy email addresses and ISO 8601 timestamps verbatim from the "
-        "question; never invent them.\n"
+        "question; never invent them. Never invent calendar links or URLs in "
+        "email bodies; the created event's link is appended automatically.\n"
         f"Tools:\n{catalog}\nQuestion: {question}\nJSON:"
     )
     try:
@@ -242,10 +243,17 @@ def route_after_confirm(state: GoogleState) -> str:
 
 
 def execute_node(state: GoogleState) -> dict[str, Any]:
-    """Run the planned tools via their LangChain wrappers."""
+    """Run the planned tools via their LangChain wrappers.
+
+    When a plan creates an event and then emails about it, the created
+    event's link is appended to the email body (unless it already carries
+    one) and recorded as ``link_injected`` — the gate approved emailing
+    about this event, so only the event's own URL is ever added.
+    """
     plan = state.get("plan", [])
     confirmed = state.get("confirmed") is True
     results: list[dict[str, Any]] = []
+    event_link = ""
     for step in plan:
         name = str(step.get("tool", ""))
         args = dict(step.get("args", {}))
@@ -258,6 +266,17 @@ def execute_node(state: GoogleState) -> dict[str, Any]:
                 }
             )
             continue
+        injected_link = False
+        if (
+            name == "gmail_send_message"
+            and event_link
+            and "http" not in str(args.get("body", ""))
+        ):
+            body = str(args.get("body", ""))
+            args["body"] = (
+                f"{body}\n\nJoin: {event_link}" if body.strip() else f"Join: {event_link}"
+            )
+            injected_link = True
         tool_obj = TOOLS_BY_NAME.get(name)
         if tool_obj is None:
             results.append({"tool": name, "status": "error", "message": "unknown tool"})
@@ -271,7 +290,13 @@ def execute_node(state: GoogleState) -> dict[str, Any]:
         except Exception as e:
             payload = {"status": "error", "message": str(e)}
         payload["tool"] = name
+        if injected_link and payload.get("status") == "ok":
+            payload["link_injected"] = True
         results.append(payload)
+        if name == "calendar_create_event" and payload.get("status") == "ok":
+            event = payload.get("event", {})
+            if isinstance(event, dict):
+                event_link = str(event.get("html_link", "") or "")
     ok = [r for r in results if r.get("status") == "ok"]
     status = "ok" if ok else ("error" if results else "empty")
     if any(r.get("status") == "blocked" for r in results) and not ok:
