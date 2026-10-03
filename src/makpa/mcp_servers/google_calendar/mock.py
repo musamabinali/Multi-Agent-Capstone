@@ -72,19 +72,20 @@ def handle_mock_calendar_tool(name: str, arguments: dict[str, Any]) -> dict[str,
             return {"status": "error", "message": str(e)}
         if end_iso <= start_iso:
             return {"status": "error", "message": "end must be after start"}
-        return {
-            "status": "ok",
-            "event": {
-                "id": "evt-mock-100",
-                "summary": arguments["summary"],
-                "start": start_iso,
-                "end": end_iso,
-                "attendees": arguments.get("attendees") or [],
-                "html_link": "https://calendar.google.com/mock/evt-mock-100",
-                "status": "confirmed",
-                "mock": True,
-            },
+        created = {
+            "id": "evt-mock-100",
+            "summary": arguments["summary"],
+            "start": start_iso,
+            "end": end_iso,
+            "attendees": arguments.get("attendees") or [],
+            "html_link": "https://calendar.google.com/mock/evt-mock-100",
+            "status": "confirmed",
+            "mock": True,
         }
+        # Persist so later update/delete (e.g. gate-2 rollback) finds the event.
+        if not any(e["id"] == created["id"] for e in MOCK_EVENTS):
+            MOCK_EVENTS.append(created)
+        return {"status": "ok", "event": dict(created)}
     if name == "calendar_check_availability":
         if not arguments.get("time_min") or not arguments.get("time_max"):
             return {"status": "error", "message": "time_min and time_max are required"}

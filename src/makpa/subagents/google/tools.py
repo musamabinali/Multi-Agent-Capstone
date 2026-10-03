@@ -12,7 +12,7 @@ import logging
 from typing import Any
 
 from langchain_core.tools import tool
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator
 
 from makpa.google.client import CALENDAR_SERVER, GMAIL_SERVER, get_google_client
 
@@ -81,11 +81,26 @@ class ListEventsArgs(BaseModel):  # type: ignore[misc]
 class CreateEventArgs(BaseModel):  # type: ignore[misc]
     """Arguments for creating a Calendar event (mutating)."""
 
-    summary: str = Field(min_length=1)
-    start: str = Field(description="Start (ISO 8601)")
-    end: str = Field(description="End (ISO 8601)")
-    attendees: list[str] = Field(default_factory=list)
-    description: str = Field(default="")
+    # planners paraphrase field names across runs (title/start_time/end_time
+    # observed live); accept the common variants at the boundary.
+    summary: str = Field(
+        min_length=1, validation_alias=AliasChoices("summary", "title", "name")
+    )
+    start: str = Field(
+        description="Start (ISO 8601)",
+        validation_alias=AliasChoices("start", "start_time", "startTime"),
+    )
+    end: str = Field(
+        description="End (ISO 8601)",
+        validation_alias=AliasChoices("end", "end_time", "endTime"),
+    )
+    attendees: list[str] = Field(
+        default_factory=list, validation_alias=AliasChoices("attendees", "attendee")
+    )
+    description: str = Field(
+        default="",
+        validation_alias=AliasChoices("description", "details", "notes", "body"),
+    )
     calendar_id: str = Field(default="primary")
 
     @field_validator("attendees", mode="before")  # type: ignore[untyped-decorator]

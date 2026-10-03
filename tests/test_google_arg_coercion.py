@@ -34,6 +34,48 @@ def test_calendar_attendee_schemas_coerce() -> None:
                                  attendees="a@x.com").attendees == ["a@x.com"]
 
 
+def test_create_event_accepts_paraphrased_fields() -> None:
+    from makpa.subagents.google.tools import CreateEventArgs
+
+    args = CreateEventArgs(
+        title="Project Sync",
+        start_time="2026-10-05T14:00:00+05:00",
+        end_time="2026-10-05T14:30:00+05:00",
+        attendees="a@x.com",
+    )
+    assert args.summary == "Project Sync"
+    assert args.start == "2026-10-05T14:00:00+05:00"
+    assert args.end == "2026-10-05T14:30:00+05:00"
+    assert args.attendees == ["a@x.com"]
+    # Canonical names keep working.
+    canon = CreateEventArgs(summary="s", start="a", end="b")
+    assert (canon.summary, canon.start, canon.end) == ("s", "a", "b")
+
+
+def test_create_event_tool_accepts_paraphrased_args() -> None:
+    from unittest.mock import MagicMock, patch
+
+    from makpa.subagents.google.tools import calendar_create_event
+
+    client = MagicMock()
+    client.call_tool.return_value = {"status": "ok", "event": {"id": "e1"}}
+    with patch(
+        "makpa.subagents.google.tools.get_google_client", return_value=client
+    ):
+        out = calendar_create_event.invoke(
+            {
+                "title": "Project Sync",
+                "start_time": "2026-10-05T14:00:00+05:00",
+                "end_time": "2026-10-05T14:30:00+05:00",
+                "attendees": ["musamabinali@gmail.com"],
+            }
+        )
+    assert out["status"] == "ok"
+    sent = client.call_tool.call_args[0][2]
+    assert sent["summary"] == "Project Sync"
+    assert sent["start"] == "2026-10-05T14:00:00+05:00"
+
+
 def test_send_tool_accepts_bare_string_recipient() -> None:
     from unittest.mock import MagicMock, patch
 

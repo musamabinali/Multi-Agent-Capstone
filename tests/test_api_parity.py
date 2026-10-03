@@ -67,6 +67,33 @@ def test_extract_google_structured_non_empty():
     assert structured["message_id"] == "msg-from-draft-mock-100"
 
 
+def test_mock_calendar_create_then_update_for_rollback():
+    """Gate-2 rollback needs update to find the just-created mock event."""
+    from makpa.mcp_servers.google_calendar import mock as cal_mock
+
+    try:
+        created = cal_mock.handle_mock_calendar_tool(
+            "calendar_create_event",
+            {
+                "summary": "T",
+                "start": "2026-10-02T15:00:00Z",
+                "end": "2026-10-02T16:00:00Z",
+            },
+        )
+        assert created["status"] == "ok"
+        updated = cal_mock.handle_mock_calendar_tool(
+            "calendar_update_event",
+            {"event_id": created["event"]["id"], "status": "cancelled"},
+        )
+        assert updated["status"] == "ok"
+        assert updated["event"]["status"] == "cancelled"
+    finally:
+        # Keep the shared fixture pristine for other tests.
+        cal_mock.MOCK_EVENTS[:] = [
+            e for e in cal_mock.MOCK_EVENTS if e["id"] != "evt-mock-100"
+        ]
+
+
 def test_worker_update_carries_structured():
     from makpa.supervisor import graph as g
 

@@ -679,6 +679,31 @@
 
 ---
 
+### 2026-10-03T20:45:00Z — POST-GATE — Composite: Email Sent, Event Failed
+- **Run 1** (`ask` schedule+email): gate approved, event `mfil5msbh82r4ssqlhngp41jrk`
+  created (confirmed), email died — planner emitted bare-string `to`,
+  `SendMessageArgs` demands `list[str]`. Nothing sent (validation precedes send).
+- **Fix**: `mode="before"` coercion (bare str → `[str]`) on `to`/`cc`/`bcc`
+  (`Draft`+`SendMessageArgs`) and `attendees` (`Create`+`CheckAvailability`);
+  7 tests incl. tool-level string-`to` replay of the live failure.
+- **Run 2** (same ask): email `1a1026c43483a113` SENT (fix works), event died —
+  planner paraphrased fields (`title`/`start_time`/`end_time` vs
+  `summary`/`start`/`end`), `CreateEventArgs` strict. No duplicate event
+  (validation precedes the call). Net real-world state: 1 event + 1 email.
+- **Fix**: `AliasChoices` on `CreateEventArgs` (summary/title/name,
+  start-time ×3, end-time ×3, attendees/attendee, description/details/notes/
+  body); canonical names still accepted; 2 more tests incl. tool-level replay.
+- **Validated**: 39 passed (coercion + google CLI/composite + terminal);
+  ruff + mypy clean; full suite 279 passed / 2 failed — both failures proven
+  pre-existing ambient-env via `git stash` (vector-store fallback expects
+  Pinecone, env provides Qdrant); 98→95% coverage delta is the untracked
+  `src/makpa/api/` dir (429 lines, not this session's), new code test-covered
+- **Warning to user**: do NOT re-run the same `ask` — it would create a
+  second event and send a second email
+- **Next**: Verify event + sent mail in Google apps; composite fully green
+
+---
+
 ### 2026-10-01T00:47:00Z — FLAG-A — Live End-to-End Path Verified (Groq)
 - **Attempted**: Close live-verification debt with at least one genuinely live path instead of deferring again
 - **Changed**: None (verification run; evidence recorded here)
