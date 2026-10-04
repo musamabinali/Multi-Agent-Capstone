@@ -195,7 +195,7 @@ def test_embeddings_gemini_configured_but_fails():
 
 def test_probe_describe_branches_and_empty_completion():
     from makpa.config import Mode
-    from makpa.llm.probe import _describe_model, probe_llm
+    from makpa.llm.probe import _describe_model, clear_probe_cache, probe_llm
     from makpa.utils.mock import create_mock_model
 
     settings = SimpleNamespace(
@@ -242,6 +242,7 @@ def test_probe_describe_branches_and_empty_completion():
         gemini_chat_model="gemini-2.0-flash",
         groq_chat_model="llama-3.3-70b-versatile",
     )
+    clear_probe_cache()
     with (
         patch("makpa.llm.probe.get_settings", return_value=live),
         patch("makpa.llm.get_llm", return_value=create_mock_model()),
@@ -254,6 +255,7 @@ def test_probe_describe_branches_and_empty_completion():
             raised = True
     assert raised
 
+    clear_probe_cache()
     with (
         patch("makpa.llm.probe.get_settings", return_value=live),
         patch("makpa.llm.get_llm", return_value=EmptyModel()),
@@ -291,7 +293,9 @@ def test_rag_demo_import_failure_no_citations_error_status_main():
         ),
     ):
         res = runner.invoke(rag_demo.app, ["ask", "q"])
-    assert res.exit_code == 0 and "no citations" in res.output
+    # Empty Citations section is omitted (sectioned output contract).
+    assert res.exit_code == 0 and "Citations" not in res.output
+    assert "total" in res.output
 
     with (
         patch("makpa.llm.probe_llm", return_value=_probe_ok()),

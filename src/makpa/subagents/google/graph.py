@@ -377,11 +377,34 @@ def composite_plan_event_node(state: GoogleState) -> dict[str, Any]:
     return {"plan": plan, "needs_confirmation": True, "composite_stage": "event_planned"}
 
 
+def _preview_event(args: dict[str, Any]) -> dict[str, Any]:
+    """Structured event fields for gate previews (additive, display-only)."""
+    event: dict[str, Any] = {}
+    for key in ("summary", "start", "end", "attendees", "description"):
+        value = args.get(key)
+        if value:
+            event[key] = value
+    return event
+
+
+def _preview_email(args: dict[str, Any]) -> dict[str, Any]:
+    """Structured email fields for gate previews (additive, display-only)."""
+    email: dict[str, Any] = {}
+    for key in ("to", "recipients", "subject", "body", "draft_id", "cc", "bcc"):
+        value = args.get(key)
+        if value:
+            email[key] = value
+    return email
+
+
 def confirm_event_node(state: GoogleState) -> dict[str, Any]:
     """Gate 1: boxed event preview before creating."""
+    plan = state.get("plan", [])
+    first_args = dict(plan[0].get("args", {})) if plan else {}
     preview = {
         "gate": 1,
-        "payload_preview": state.get("plan", []),
+        "payload_preview": plan,
+        "event": _preview_event(first_args),
         "question": state.get("question", ""),
         "hint": 'Resume with {"confirm": true} to create the event, anything else cancels.',
     }
@@ -467,9 +490,33 @@ def composite_plan_email_node(state: GoogleState) -> dict[str, Any]:
 
 def confirm_email_node(state: GoogleState) -> dict[str, Any]:
     """Gate 2: boxed email preview before sending (supports rollback)."""
+    plan = state.get("plan", [])
+    email_args = dict(plan[0].get("args", {})) if plan else {}
+    created: dict[str, Any] = next(
+        (
+            r
+            for r in state.get("tool_results", [])
+            if r.get("tool") == "calendar_create_event" and r.get("status") == "ok"
+        ),
+        {},
+    )
+    raw_event = created.get("event", {})
+    created_event = raw_event if isinstance(raw_event, dict) else {}
+    event = _preview_event(
+        {
+            "summary": created_event.get("summary", ""),
+            "start": created_event.get("start", ""),
+            "end": created_event.get("end", ""),
+            # The invite goes to the email recipients (== event attendees).
+            "attendees": email_args.get("to", email_args.get("recipients", "")),
+            "html_link": created_event.get("html_link", ""),
+        }
+    )
     preview = {
         "gate": 2,
-        "payload_preview": state.get("plan", []),
+        "payload_preview": plan,
+        "event": event,
+        "email": _preview_email(email_args),
         "question": state.get("question", ""),
         "note": "Declining keeps the created calendar event; only the email is skipped.",
         "hint": 'Resume with {"confirm": true} to send, {"rollback": true} '

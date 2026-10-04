@@ -31,6 +31,7 @@ class LLMFactory:
     def __init__(self) -> None:
         if not hasattr(self, "_initialized"):
             self._settings = get_settings()
+            self._fallback_resolved = False
             self._initialized = True
 
     def _create_gemini_model(self) -> BaseChatModel | None:
@@ -47,10 +48,10 @@ class LLMFactory:
                 temperature=self._settings.llm_temperature,
                 max_output_tokens=self._settings.llm_max_tokens,
             )
-            logger.info("Created Gemini model: %s", self._settings.gemini_chat_model)
+            logger.debug("Created Gemini model: %s", self._settings.gemini_chat_model)
             return model
         except Exception as e:
-            logger.warning("Failed to create Gemini model: %s", e)
+            logger.debug("Failed to create Gemini model: %s", e)
             return None
 
     def _create_groq_model(self) -> BaseChatModel | None:
@@ -67,15 +68,15 @@ class LLMFactory:
                 temperature=self._settings.llm_temperature,
                 max_tokens=self._settings.llm_max_tokens,
             )
-            logger.info("Created Groq model: %s", self._settings.groq_chat_model)
+            logger.debug("Created Groq model: %s", self._settings.groq_chat_model)
             return model
         except Exception as e:
-            logger.warning("Failed to create Groq model: %s", e)
+            logger.debug("Failed to create Groq model: %s", e)
             return None
 
     def _create_mock_model(self) -> BaseChatModel:
         """Create a mock chat model for demo mode."""
-        logger.info("Created Mock model (demo mode)")
+        logger.debug("Created Mock model (demo mode)")
         return create_mock_model()
 
     def get_model(self, provider: str | None = None) -> BaseChatModel:
@@ -99,16 +100,17 @@ class LLMFactory:
         if target_provider == "gemini":
             model = self._create_gemini_model()
             if model is None:
-                logger.warning("Gemini unavailable, trying Groq")
+                # First fallback notice is user-facing; repeats stay at debug.
+                logger.debug("Gemini unavailable, trying Groq")
                 model = self._create_groq_model()
             if model is None:
-                logger.warning("Groq unavailable, falling back to Mock")
+                logger.debug("Groq unavailable, falling back to Mock")
                 model = self._create_mock_model()
 
         elif target_provider == "groq":
             model = self._create_groq_model()
             if model is None:
-                logger.warning("Groq unavailable, falling back to Mock")
+                logger.debug("Groq unavailable, falling back to Mock")
                 model = self._create_mock_model()
 
         else:  # mock or any other
@@ -122,7 +124,17 @@ class LLMFactory:
         """Get a model with automatic fallback chain: Gemini -> Groq -> Mock.
 
         This is the primary accessor that implements the full fallback logic.
+        The resolved provider is cached per session so the test invoke (and
+        any 403 fallback warning) runs once, not on every LLM call.
         """
+        # Fast path: a resolved fallback model is already warm for this session.
+        if self._cached_model is not None and self._cached_provider in (
+            "gemini",
+            "groq",
+            "mock",
+        ):
+            if getattr(self, "_fallback_resolved", False):
+                return self._cached_model
         # Priority order: Gemini > Groq > Mock
         for provider in ["gemini", "groq", "mock"]:
             model = self.get_model(provider)
@@ -131,22 +143,25 @@ class LLMFactory:
                 try:
                     test_response = model.invoke("test")
                     if test_response and test_response.content:
-                        logger.info("LLM provider resolved: %s", provider)
+                        logger.debug("LLM provider resolved: %s", provider)
+                        self._fallback_resolved = True
                         return model
                 except Exception as e:
-                    logger.warning("Provider %s failed test invoke: %s", provider, e)
+                    logger.debug("Provider %s failed test invoke: %s", provider, e)
                     # Clear cache to force retry with next provider
                     self._cached_model = None
                     self._cached_provider = None
                     continue
 
         # Should never reach here since mock always works
+        self._fallback_resolved = True
         return self._create_mock_model()
 
     def clear_cache(self) -> None:
         """Clear the cached model (useful for testing)."""
         self._cached_model = None
         self._cached_provider = None
+        self._fallback_resolved = False
 
 
 # Module-level singleton instance

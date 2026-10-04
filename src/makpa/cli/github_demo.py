@@ -14,7 +14,11 @@ app = typer.Typer(help="MAKPA GitHub demo CLI (Phase 2)")
 GITHUB_INDICATOR = "\U0001f419 GitHub agent"
 
 
-def _setup_logging() -> None:
+def _setup_logging(
+    verbose: bool | None = None,
+    quiet: bool = False,
+    log_file: str | None = None,
+) -> None:
     import sys
 
     for stream in (sys.stdout, sys.stderr):
@@ -24,36 +28,80 @@ def _setup_logging() -> None:
                 reconfig(encoding="utf-8", errors="replace")
             except Exception:
                 pass
-    from makpa.utils.terminal import setup_logging
+    from makpa.utils.terminal import reset_cli_ux_state, setup_logging
 
-    setup_logging()
+    reset_cli_ux_state()
+    setup_logging(verbose=verbose, quiet=quiet, log_file=log_file)
 
 
-def _startup() -> None:
-    """Print banner, run the model probe, and report the GitHub path."""
+def _apply_output_flags(
+    verbose: bool = False,
+    quiet: bool = False,
+    no_color: bool = False,
+    no_emoji: bool = False,
+    log_file: str | None = None,
+) -> None:
+    """Apply output flags, then setup logging."""
+    import os
+
+    if no_color:
+        os.environ["MAKPA_NO_COLOR"] = "1"
+    if no_emoji:
+        os.environ["MAKPA_NO_EMOJI"] = "1"
+    if verbose:
+        os.environ["MAKPA_VERBOSE"] = "1"
+    if quiet:
+        os.environ["MAKPA_QUIET"] = "1"
+    _setup_logging(
+        verbose=True if verbose else (None if not quiet else False),
+        quiet=quiet,
+        log_file=log_file,
+    )
+
+
+def _startup(quiet: bool = False) -> None:
+    """Print banner, run the model probe, and report the GitHub path (once)."""
     from makpa.llm import probe_llm
+    from makpa.utils.terminal import (
+        banner_already_printed,
+        fallback_notice,
+        mark_banner_printed,
+        verbose_enabled,
+    )
 
-    print_startup_banner()
-    typer.echo(f"{GITHUB_INDICATOR} probing LLM (Gemini -> Groq -> mock)...")
+    first = not banner_already_printed()
+    if first and not quiet:
+        print_startup_banner()
+    if first:
+        mark_banner_printed()
+    if first and not quiet:
+        typer.echo(f"{GITHUB_INDICATOR} probing LLM (Gemini -> Groq -> mock)...")
     try:
         result = probe_llm()
     except RuntimeError as e:
         typer.echo(f"{GITHUB_INDICATOR} startup probe failed: {e}", err=True)
         raise typer.Exit(code=1)
-    for warning in result.warnings:
-        typer.echo(f"{GITHUB_INDICATOR} warning: {warning}")
+    if first:
+        if result.provider in ("groq", "mock"):
+            notice = fallback_notice("Groq" if result.provider == "groq" else "mock")
+            if notice and not quiet:
+                typer.echo(f"{GITHUB_INDICATOR} {notice}")
+        for warning in result.warnings:
+            if verbose_enabled() or first:
+                typer.echo(f"{GITHUB_INDICATOR} warning: {warning}", err=True)
     settings = get_settings()
-    typer.echo(
-        f"{GITHUB_INDICATOR} path: {settings.resolved_github_mcp_path} "
-        f"| llm: {result.provider} ({result.model})"
-    )
+    if first and not quiet:
+        typer.echo(
+            f"{GITHUB_INDICATOR} path: {settings.resolved_github_mcp_path} "
+            f"| llm: {result.provider} ({result.model})"
+        )
 
 
 def _boxed(title: str, lines: list[str]) -> None:
     from makpa.utils.terminal import wrap_box_lines
 
-    lines = wrap_box_lines(lines)
-    width = max([len(title)] + [len(line) for line in lines] + [10]) + 4
+    lines = wrap_box_lines(lines, width=72)
+    width = min(max([len(title)] + [len(line) for line in lines] + [10]) + 4, 78)
     border = "+" + "-" * (width - 2) + "+"
     typer.echo(border)
     typer.echo(f"| {title:<{width - 4}} |")
@@ -70,38 +118,147 @@ def _stream_text(text: str) -> None:
 
 
 @app.command()  # type: ignore[untyped-decorator]
-def ask(question: str = typer.Argument(..., help="GitHub question to ask")) -> None:
+def ask(
+    question: str = typer.Argument(..., help="GitHub question to ask"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+    quiet: bool = typer.Option(False, "--quiet", "-q"),
+    json_output: bool = typer.Option(False, "--json"),
+    no_color: bool = typer.Option(False, "--no-color"),
+    no_emoji: bool = typer.Option(False, "--no-emoji"),
+    log_file: str = typer.Option(""),
+    interactive: bool = typer.Option(False, "--interactive", "-i"),
+) -> None:
     """Ask: python -m makpa.cli.github_demo ask "<question>"."""
-    from langgraph.errors import GraphInterrupt
+    import time
 
     from makpa.subagents.github import create_github_graph
-    from makpa.utils.interrupts import detect_interrupt
 
-    _setup_logging()
-    _startup()
-    typer.echo(f"{GITHUB_INDICATOR} thinking...")
+    _apply_output_flags(verbose, quiet or json_output, no_color, no_emoji, log_file or None)
+    _startup(quiet=quiet or json_output)
     settings = get_settings()
     checkpointer = MemorySaver()
     graph = create_github_graph(checkpointer=checkpointer)
-    config = {"configurable": {"thread_id": f"{settings.thread_id_prefix}-github"}}
+    base_thread = f"{settings.thread_id_prefix}-github"
+    if interactive:
+        _ask_repl(graph, base_thread, verbose, quiet, json_output)
+        return
+    t0 = time.monotonic()
+    result = _ask_once(graph, base_thread, question, quiet=quiet or json_output)
+    _report_ask(result, time.monotonic() - t0, verbose, quiet, json_output)
+
+
+def _ask_once(graph: Any, thread_id: str, question: str, quiet: bool = False) -> dict[str, Any]:
+    """Invoke until no gate is pending."""
+    import time
+
+    from langgraph.errors import GraphInterrupt
+
+    from makpa.utils.interrupts import detect_interrupt
+    from makpa.utils.terminal import progress_done
+
+    config = {"configurable": {"thread_id": thread_id}}
+    started = time.monotonic()
+    if not quiet:
+        typer.echo(f"{GITHUB_INDICATOR} working...")
     try:
         result = graph.invoke({"question": question}, config)
         if detect_interrupt(result) is not None or _is_paused(graph, config):
-            result = _resolve_confirmation(graph, config)
+            result = _resolve_confirmation(graph, config, quiet=quiet)
     except GraphInterrupt:
-        result = _resolve_confirmation(graph, config)
-    except typer.Exit:
+        result = _resolve_confirmation(graph, config, quiet=quiet)
+    except typer.Exit as e:
+        if e.exit_code == 2 and not quiet:
+            from makpa.utils.terminal import format_cancelled_timing
+
+            typer.echo(format_cancelled_timing(time.monotonic() - started))
         raise
     except Exception as e:
         typer.echo(f"{GITHUB_INDICATOR} query failed: {e}", err=True)
         raise typer.Exit(code=1)
-    # A second interrupt can surface if confirmation was deferred.
+    if not quiet:
+        typer.echo(progress_done("github", "github turn complete", time.monotonic() - started))
+    return dict(result) if isinstance(result, dict) else {"answer": str(result)}
+
+
+def _report_ask(
+    result: dict[str, Any], total_s: float, verbose: bool, quiet: bool, json_output: bool
+) -> None:
+    import json as _json
+
+    from makpa.utils.terminal import (
+        clean_answer_text,
+        format_cancelled_timing,
+        format_timing,
+        render_sectioned_result,
+    )
+
     if isinstance(result, dict) and result.get("status") == "confirmation_required":
         typer.echo(f"{GITHUB_INDICATOR} confirmation required but not granted.")
+        if not json_output:
+            typer.echo(format_cancelled_timing(total_s))
         raise typer.Exit(code=2)
-    _stream_text(result.get("answer", ""))
-    if result.get("status") == "error":
+    raw_answer = result.get("answer", "") if isinstance(result, dict) else str(result)
+    answer = clean_answer_text(raw_answer)
+    structured = result.get("structured", {}) if isinstance(result, dict) else {}
+    if json_output:
+        typer.echo(
+            _json.dumps(
+                {"answer": answer, "citations": [], "actions": structured,
+                 "timings": {"total_s": round(total_s, 2)}, "status": result.get("status", "ok")},
+                default=str,
+            )
+        )
+    elif quiet:
+        typer.echo(answer)
+        typer.echo(format_timing(total_s, {}, parallel=False))
+    else:
+        typer.echo(
+            render_sectioned_result(answer, citations=[], structured=structured,
+                                    total_s=total_s, parts={"GitHub": total_s}, verbose=verbose)
+        )
+    if isinstance(result, dict) and result.get("status") == "error":
         raise typer.Exit(code=1)
+
+
+def _ask_repl(graph: Any, base_thread: str, verbose: bool, quiet: bool, json_output: bool) -> None:
+    import time
+
+    thread_id = base_thread
+    typer.echo("makpa › interactive GitHub session (:exit, :reset, :thread <id>, :verbose)")
+    while True:
+        try:
+            line = input("makpa › ").strip()
+        except (EOFError, KeyboardInterrupt):
+            typer.echo("")
+            return
+        if not line:
+            continue
+        low = line.lower()
+        if low in (":exit", ":quit", "exit", "quit"):
+            return
+        if low == ":reset":
+            thread_id = base_thread
+            typer.echo("thread reset.")
+            continue
+        if low.startswith(":thread"):
+            parts = line.split(None, 1)
+            if len(parts) == 2 and parts[1].strip():
+                thread_id = parts[1].strip()
+                typer.echo(f"thread: {thread_id}")
+            continue
+        if low == ":verbose":
+            verbose = not verbose
+            _setup_logging(verbose=verbose)
+            typer.echo(f"verbose {'on' if verbose else 'off'}.")
+            continue
+        t0 = time.monotonic()
+        try:
+            result = _ask_once(graph, thread_id, line, quiet=quiet or json_output)
+            _report_ask(result, time.monotonic() - t0, verbose, quiet, json_output)
+        except typer.Exit as e:
+            typer.echo(f"(turn exited with code {e.exit_code})")
+        except Exception as e:
+            typer.echo(f"Turn failed: {e}", err=True)
 
 
 def _is_paused(graph: Any, config: dict[str, Any]) -> bool:
@@ -113,14 +270,20 @@ def _is_paused(graph: Any, config: dict[str, Any]) -> bool:
         return False
 
 
-def _resolve_confirmation(graph: Any, config: dict[str, Any]) -> dict[str, Any]:
-    """Show the boxed payload preview and resume (or cancel) the graph."""
+def _resolve_confirmation(
+    graph: Any, config: dict[str, Any], quiet: bool = False
+) -> dict[str, Any]:
+    """Show the adaptive confirmation card and resume (or cancel) the graph."""
     from makpa.utils.interrupts import resume_with
+    from makpa.utils.terminal import confirmation_indicator, format_confirmation_card
 
     preview = _pending_preview(graph, config)
-    lines = [f"{k}: {v}" for k, v in preview.items()]
-    _boxed("Confirmation required (mutating GitHub tool)", lines)
-    if not typer.confirm(f"{GITHUB_INDICATOR} approve this write?"):
+    if quiet:
+        indicator = GITHUB_INDICATOR
+    else:
+        typer.echo(format_confirmation_card(preview))
+        indicator = confirmation_indicator(preview)
+    if not typer.confirm(f"{indicator} approve this write?"):
         declined = resume_with(graph, config, {"confirm": False})
         _stream_text(declined.get("answer", "Cancelled."))
         raise typer.Exit(code=2)
@@ -210,12 +373,17 @@ def create_issue(
 
 
 def _render_payload(payload: Any) -> None:
+    import json as _json
+
     if isinstance(payload, dict):
         _stream_text(f"status: {payload.get('status', '?')}")
         for key, value in payload.items():
             if key in ("status", "tool"):
                 continue
-            typer.echo(f"{GITHUB_INDICATOR} {key}: {value}")
+            rendered = (
+                _json.dumps(value, default=str) if isinstance(value, (dict, list)) else str(value)
+            )
+            typer.echo(f"{GITHUB_INDICATOR} {key}: {rendered}")
         if payload.get("status") == "error":
             raise typer.Exit(code=1)
     else:

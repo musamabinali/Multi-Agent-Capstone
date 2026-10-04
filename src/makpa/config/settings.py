@@ -447,24 +447,27 @@ def print_startup_banner() -> None:
     settings = get_settings()
 
     lines = [
-        "+==============================================================================+",
-        "|                     MAKPA - Multi-Agent System                               |",
-        "+==============================================================================+",
-        f"|  Mode:              {settings.resolved_mode.value:<52} |",
-        f"|  LLM Provider:      {settings.resolved_llm_provider.value:<52} |",
-        f"|  Vector Store:      {settings.resolved_vector_store.value:<52} |",
-        f"|  Embedding Provider: {settings.embedding_provider.value:<51} |",
-        f"|  Google MCP Mode:   {settings.resolved_google_mcp_mode.value:<52} |",
-        f"|  Google OAuth:        {settings.resolved_google_oauth_state:<51} |",
-        f"|  GitHub MCP:         {settings.resolved_github_mcp_path:<52} |",
-        "+==============================================================================+",
+        "   ",
+        "   ",
+        "+========================================================+",
+        "|             MAKPA - Multi-Agent System                 |",
+        "+========================================================+",
+        f"|  Mode:                  {settings.resolved_mode.value:<52}",
+        f"|  LLM Provider:          {settings.resolved_llm_provider.value:<52}",
+        f"|  Vector Store:          {settings.resolved_vector_store.value:<52}",
+        f"|  Embedding Provider:    {settings.embedding_provider.value:<51}",
+        f"|  Google MCP Mode:       {settings.resolved_google_mcp_mode.value:<52}",
+        f"|  Google OAuth:          {settings.resolved_google_oauth_state:<51}",
+        f"|  GitHub MCP:            {settings.resolved_github_mcp_path:<52}",
+        "+========================================================+",
+        "   ",
     ]
 
     if settings.downgrade_reasons:
-        lines.append("| Downgrades:                                                          |")
+        lines.append("| Downgrades:")
         for reason in settings.downgrade_reasons:
             lines.append(f"|   - {reason:<63} |")
-        lines.append("+==============================================================================+")
+        lines.append("+========================================================+")
 
     if settings.resolved_mode == Mode.LIVE:
         note = "Note: live = live LLM; MCP mocked unless credentials present"

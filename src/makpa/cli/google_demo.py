@@ -20,7 +20,12 @@ GMAIL_INDICATOR = "\u2709\ufe0f Gmail"
 MAX_RESUMES = 3
 
 
-def _setup_logging() -> None:
+def _setup_logging(
+    verbose: bool | None = None,
+    quiet: bool = False,
+    log_file: str | None = None,
+) -> None:
+    import os
     import sys
 
     for stream in (sys.stdout, sys.stderr):
@@ -30,29 +35,82 @@ def _setup_logging() -> None:
                 reconfig(encoding="utf-8", errors="replace")
             except Exception:
                 pass
-    from makpa.utils.terminal import setup_logging
+    # --no-color / --no-emoji propagate via env for the terminal layer.
+    _ = os.environ
+    from makpa.utils.terminal import reset_cli_ux_state, setup_logging
 
-    setup_logging()
+    # Each top-level command entry is a fresh session (separate OS process
+    # in real use); REPL turns reuse the session via _ask_once/_run_once,
+    # which never call _setup_logging.
+    reset_cli_ux_state()
+    setup_logging(verbose=verbose, quiet=quiet, log_file=log_file)
+
+
+def _apply_output_flags(
+    verbose: bool = False,
+    quiet: bool = False,
+    no_color: bool = False,
+    no_emoji: bool = False,
+    log_file: str | None = None,
+) -> None:
+    """Apply --verbose/--quiet/--no-color/--no-emoji/--log-file, then setup."""
+    import os
+
+    if no_color:
+        os.environ["MAKPA_NO_COLOR"] = "1"
+    if no_emoji:
+        os.environ["MAKPA_NO_EMOJI"] = "1"
+    if verbose:
+        os.environ["MAKPA_VERBOSE"] = "1"
+    if quiet:
+        os.environ["MAKPA_QUIET"] = "1"
+    _setup_logging(
+        verbose=True if verbose else (None if not quiet else False),
+        quiet=quiet,
+        log_file=log_file,
+    )
 
 
 def _split_list(raw: str) -> list[str]:
     return [part.strip() for part in raw.split(",") if part.strip()]
 
 
-def _startup() -> dict[str, str]:
-    """Banner, probe, OAuth/mode report. Returns resolved MCP paths."""
+def _startup(quiet: bool = False) -> dict[str, str]:
+    """Banner, probe, OAuth/mode report. Returns resolved MCP paths.
+
+    The banner and the Gemini->Groq fallback notice print once per
+    session; later calls reuse the cached probe silently.
+    """
     from makpa.google.client import get_google_client
     from makpa.llm import probe_llm
+    from makpa.utils.terminal import (
+        banner_already_printed,
+        fallback_notice,
+        mark_banner_printed,
+        verbose_enabled,
+    )
 
-    print_startup_banner()
-    typer.echo(f"{CALENDAR_INDICATOR} probing LLM (Gemini -> Groq -> mock)...")
+    first = not banner_already_printed()
+    if first and not quiet:
+        print_startup_banner()
+    if first:
+        mark_banner_printed()
+    if first and not quiet:
+        typer.echo(f"{CALENDAR_INDICATOR} probing LLM (Gemini -> Groq -> mock)...")
     try:
         result = probe_llm()
     except RuntimeError as e:
         typer.echo(f"{CALENDAR_INDICATOR} startup probe failed: {e}", err=True)
         raise typer.Exit(code=1)
-    for warning in result.warnings:
-        typer.echo(f"{CALENDAR_INDICATOR} warning: {warning}")
+    if first:
+        # One-time fallback notice: Gemini 403 -> Groq, then silent.
+        if result.provider in ("groq", "mock"):
+            notice = fallback_notice("Groq" if result.provider == "groq" else "mock")
+            if notice and not quiet:
+                typer.echo(f"{CALENDAR_INDICATOR} {notice}")
+        for warning in result.warnings:
+            if verbose_enabled() or first:
+                typer.echo(f"{CALENDAR_INDICATOR} warning: {warning}", err=True)
     settings = get_settings()
     # Explicit local mode without credentials is a reauth situation, not
     # a silent mock fallback (auto mode still degrades to mock).
@@ -67,11 +125,12 @@ def _startup() -> dict[str, str]:
         "calendar": str(raw_paths.get("calendar", "mock")),
         "gmail": str(raw_paths.get("gmail", "mock")),
     }
-    typer.echo(
-        f"{CALENDAR_INDICATOR} paths: calendar={paths.get('calendar')} "
-        f"gmail={paths.get('gmail')} | oauth: {settings.resolved_google_oauth_state} "
-        f"| llm: {result.provider} ({result.model})"
-    )
+    if first and not quiet:
+        typer.echo(
+            f"{CALENDAR_INDICATOR} paths: calendar={paths.get('calendar')} "
+            f"gmail={paths.get('gmail')} | oauth: {settings.resolved_google_oauth_state} "
+            f"| llm: {result.provider} ({result.model})"
+        )
     return paths
 
 
@@ -102,8 +161,8 @@ def _exit_reauth() -> None:
 def _boxed(title: str, lines: list[str]) -> None:
     from makpa.utils.terminal import wrap_box_lines
 
-    lines = wrap_box_lines(lines)
-    width = max([len(title)] + [len(line) for line in lines] + [10]) + 4
+    lines = wrap_box_lines(lines, width=72)
+    width = min(max([len(title)] + [len(line) for line in lines] + [10]) + 4, 78)
     border = "+" + "-" * (width - 2) + "+"
     typer.echo(border)
     typer.echo(f"| {title:<{width - 4}} |")
@@ -111,6 +170,17 @@ def _boxed(title: str, lines: list[str]) -> None:
     for line in lines:
         typer.echo(f"| {line:<{width - 4}} |")
     typer.echo(border)
+
+
+def _show_confirmation_card(preview: dict[str, Any]) -> str:
+    """Render the adaptive confirmation card. Returns the prompt indicator."""
+    from makpa.utils.terminal import (
+        confirmation_indicator,
+        format_confirmation_card,
+    )
+
+    typer.echo(format_confirmation_card(preview))
+    return str(confirmation_indicator(preview))
 
 
 def _stream_text(text: str, indicator: str = CALENDAR_INDICATOR) -> None:
@@ -121,12 +191,18 @@ def _stream_text(text: str, indicator: str = CALENDAR_INDICATOR) -> None:
 
 
 def _render_payload(payload: Any, indicator: str) -> None:
+    import json as _json
+
     if isinstance(payload, dict):
         _stream_text(f"status: {payload.get('status', '?')}", indicator)
         for key, value in payload.items():
             if key in ("status", "tool"):
                 continue
-            typer.echo(f"{indicator} {key}: {value}")
+            # JSON (double quotes) — never raw Python dict repr.
+            rendered = (
+                _json.dumps(value, default=str) if isinstance(value, (dict, list)) else str(value)
+            )
+            typer.echo(f"{indicator} {key}: {rendered}")
         if payload.get("status") == "error":
             raise typer.Exit(code=1)
     else:
@@ -338,44 +414,214 @@ def send(
 
 
 @app.command()  # type: ignore[untyped-decorator]
-def ask(question: str = typer.Argument(..., help="Google Workspace question")) -> None:
+def ask(
+    question: str = typer.Argument(..., help="Google Workspace question"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="INFO logs on stderr"),
+    quiet: bool = typer.Option(False, "--quiet", "-q", help="Answer + timing only"),
+    json_output: bool = typer.Option(False, "--json", help="Single JSON object on stdout"),
+    no_color: bool = typer.Option(False, "--no-color", help="Disable ANSI colors"),
+    no_emoji: bool = typer.Option(False, "--no-emoji", help="Disable emoji"),
+    log_file: str = typer.Option("", "--log-file", help="Full logs to PATH"),
+    interactive: bool = typer.Option(False, "--interactive", "-i", help="Warm session REPL"),
+) -> None:
     """Ask: python -m makpa.cli.google_demo ask "schedule a meeting ..."."""
-    from langgraph.errors import GraphInterrupt
+    import time
 
     from makpa.subagents.google import create_google_graph
 
-    _setup_logging()
-    _startup()
-    typer.echo(f"{CALENDAR_INDICATOR} thinking...")
+    _apply_output_flags(verbose, quiet or json_output, no_color, no_emoji, log_file or None)
+    paths = _startup(quiet=quiet or json_output)
+    _ = paths
     settings = get_settings()
     checkpointer = MemorySaver()
     graph = create_google_graph(checkpointer=checkpointer)
-    config = {"configurable": {"thread_id": f"{settings.thread_id_prefix}-google"}}
+    base_thread = f"{settings.thread_id_prefix}-google"
+    if interactive:
+        _ask_repl(graph, base_thread, verbose=verbose, quiet=quiet, json_output=json_output)
+        return
+    t0 = time.monotonic()
+    result = _ask_once(graph, base_thread, question, quiet=quiet or json_output)
+    total = time.monotonic() - t0
+    _report_ask_result(result, total_s=total, verbose=verbose, quiet=quiet, json_output=json_output)
+
+
+def _ask_once(
+    graph: Any, thread_id: str, question: str, quiet: bool = False
+) -> dict[str, Any]:
+    """Invoke the google graph until no gate is pending."""
+    import time
+
+    from langgraph.errors import GraphInterrupt
+
+    from makpa.utils.terminal import progress_done
+
+    config = {"configurable": {"thread_id": thread_id}}
+    started = time.monotonic()
+    if not quiet:
+        typer.echo(f"{CALENDAR_INDICATOR} working...")
     try:
         result = graph.invoke({"question": question}, config)
         for _ in range(MAX_RESUMES):
             if _is_interrupted(graph, config, result):
-                result = _resolve_confirmation(graph, config)
+                result = _resolve_confirmation(graph, config, quiet=quiet)
             else:
                 break
     except GraphInterrupt:
-        result = _resolve_confirmation(graph, config)
-    except typer.Exit:
+        result = _resolve_confirmation(graph, config, quiet=quiet)
+    except typer.Exit as e:
+        if e.exit_code == 2 and not quiet:
+            from makpa.utils.terminal import format_cancelled_timing
+
+            typer.echo(format_cancelled_timing(time.monotonic() - started))
         raise
     except ReauthRequiredError:
         _exit_reauth()
     except Exception as e:
         typer.echo(f"{CALENDAR_INDICATOR} query failed: {e}", err=True)
         raise typer.Exit(code=1)
-    if isinstance(result, dict) and result.get("status") == "confirmation_required":
+    dur = time.monotonic() - started
+    if not quiet:
+        typer.echo(progress_done("calendar", "google turn complete", dur))
+    return dict(result) if isinstance(result, dict) else {"answer": str(result)}
+
+
+def _report_ask_result(
+    result: dict[str, Any], total_s: float, verbose: bool, quiet: bool, json_output: bool
+) -> None:
+    """Render sectioned Answer/Actions + timing footer (or JSON)."""
+    import json as _json
+
+    from makpa.utils.terminal import (
+        clean_answer_text,
+        format_cancelled_timing,
+        format_timing,
+    )
+
+    status = result.get("status", "ok")
+    if status == "confirmation_required":
         typer.echo(f"{CALENDAR_INDICATOR} confirmation required but not granted.")
+        if not json_output:
+            typer.echo(format_cancelled_timing(total_s))
         raise typer.Exit(code=2)
-    if isinstance(result, dict) and result.get("status") == "cancelled":
+    if status == "cancelled":
         _stream_text(result.get("answer", "Cancelled."))
+        if not json_output:
+            typer.echo(format_cancelled_timing(total_s))
         raise typer.Exit(code=2)
-    _stream_text(result.get("answer", "") if isinstance(result, dict) else str(result))
-    if isinstance(result, dict) and result.get("status") == "error":
+    answer = clean_answer_text(result.get("answer", ""))
+    structured = result.get("structured") or _structured_from_result(result)
+    if json_output:
+        typer.echo(
+            _json.dumps(
+                {
+                    "answer": answer,
+                    "citations": [],
+                    "actions": structured,
+                    "timings": {"total_s": round(total_s, 2)},
+                    "status": status,
+                },
+                default=str,
+            )
+        )
+    elif quiet:
+        typer.echo(answer)
+        typer.echo(format_timing(total_s, {}, parallel=False))
+    else:
+        _render_sectioned(answer, structured, total_s, verbose=verbose)
+    if status == "error":
         raise typer.Exit(code=1)
+
+
+def _structured_from_result(result: dict[str, Any]) -> dict[str, Any]:
+    """Best-effort structured ids from tool_results (never prose regex)."""
+    structured: dict[str, Any] = {}
+    tool_results = result.get("tool_results")
+    items = tool_results if isinstance(tool_results, list) else []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        event = item.get("event")
+        if isinstance(event, dict) and event.get("id"):
+            structured.setdefault("event_ids", []).append(str(event["id"]))
+            structured["event_id"] = str(event["id"])
+        for ev in item.get("events", []) if isinstance(item.get("events"), list) else []:
+            if isinstance(ev, dict) and ev.get("id"):
+                structured.setdefault("event_ids", []).append(str(ev["id"]))
+        sent = item.get("sent")
+        if isinstance(sent, dict) and sent.get("id"):
+            structured["message_id"] = str(sent["id"])
+        if item.get("message_id"):
+            structured["message_id"] = str(item["message_id"])
+        if item.get("draft_id"):
+            structured["draft_id"] = str(item["draft_id"])
+    return structured
+
+
+def _render_sectioned(
+    answer: str, structured: dict[str, Any], total_s: float, verbose: bool = False
+) -> None:
+    from makpa.utils.terminal import render_sectioned_result
+
+    typer.echo(
+        render_sectioned_result(
+            answer,
+            citations=[],
+            structured=structured,
+            total_s=total_s,
+            parts={"Google": total_s},
+            verbose=verbose,
+        )
+    )
+
+
+def _ask_repl(
+    graph: Any, base_thread: str, verbose: bool, quiet: bool, json_output: bool
+) -> None:
+    """Warm interactive session (banner/probe paid once)."""
+    import time
+
+    thread_id = base_thread
+    typer.echo("makpa › interactive Google session (:exit, :reset, :thread <id>, :verbose)")
+    while True:
+        try:
+            line = input("makpa › ").strip()
+        except (EOFError, KeyboardInterrupt):
+            typer.echo("")
+            return
+        if not line:
+            continue
+        low = line.lower()
+        if low in (":exit", ":quit", "exit", "quit"):
+            return
+        if low == ":reset":
+            thread_id = base_thread
+            typer.echo("thread reset.")
+            continue
+        if low.startswith(":thread"):
+            parts = line.split(None, 1)
+            if len(parts) == 2 and parts[1].strip():
+                thread_id = parts[1].strip()
+                typer.echo(f"thread: {thread_id}")
+            continue
+        if low == ":verbose":
+            verbose = not verbose
+            _setup_logging(verbose=verbose)
+            typer.echo(f"verbose {'on' if verbose else 'off'}.")
+            continue
+        t0 = time.monotonic()
+        try:
+            result = _ask_once(graph, thread_id, line, quiet=quiet or json_output)
+            _report_ask_result(
+                result,
+                total_s=time.monotonic() - t0,
+                verbose=verbose,
+                quiet=quiet,
+                json_output=json_output,
+            )
+        except typer.Exit as e:
+            typer.echo(f"(turn exited with code {e.exit_code})")
+        except Exception as e:
+            typer.echo(f"Turn failed: {e}", err=True)
 
 
 def _is_interrupted(graph: Any, config: dict[str, Any], result: Any) -> bool:
@@ -388,18 +634,17 @@ def _is_interrupted(graph: Any, config: dict[str, Any], result: Any) -> bool:
         return False
 
 
-def _resolve_confirmation(graph: Any, config: dict[str, Any]) -> dict[str, Any]:
-    """Show the boxed preview for the pending gate and resume or cancel."""
+def _resolve_confirmation(
+    graph: Any, config: dict[str, Any], quiet: bool = False
+) -> dict[str, Any]:
+    """Show the adaptive confirmation card and resume or cancel."""
     from makpa.utils.interrupts import resume_with
-    from makpa.utils.terminal import confirmation_title
 
     preview = _pending_preview(graph, config)
     gate = preview.get("gate", "?")
-    lines = [f"{k}: {v}" for k, v in preview.items()]
-    indicator = CALENDAR_INDICATOR if gate == 1 else GMAIL_INDICATOR
-    _boxed(confirmation_title(preview), lines)
+    indicator = _show_confirmation_card(preview) if not quiet else "Confirm"
     if gate == 2:
-        return _resolve_gate2(graph, config, indicator)
+        return _resolve_gate2(graph, config, indicator, quiet=quiet)
     if not typer.confirm(f"{indicator} approve?"):
         declined = resume_with(graph, config, {"confirm": False})
         _stream_text(declined.get("answer", "Cancelled."))
@@ -408,10 +653,13 @@ def _resolve_confirmation(graph: Any, config: dict[str, Any]) -> dict[str, Any]:
     return resumed
 
 
-def _resolve_gate2(graph: Any, config: dict[str, Any], indicator: str) -> dict[str, Any]:
+def _resolve_gate2(
+    graph: Any, config: dict[str, Any], indicator: str, quiet: bool = False
+) -> dict[str, Any]:
     """Gate-2 prompt with rollback: [y/N/rollback]."""
     from makpa.utils.interrupts import resume_with
 
+    _ = quiet
     choice = typer.prompt(
         f"{indicator} approve? [y/N/rollback]", default="n"
     ).strip().lower()

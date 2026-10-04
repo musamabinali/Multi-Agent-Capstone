@@ -48,13 +48,23 @@ def _describe_model(model: object, settings: Settings) -> tuple[str, str]:
     return str(settings.resolved_llm_provider.value), cls_name
 
 
+_PROBE_CACHE: ProbeResult | None = None
+
+
+def clear_probe_cache() -> None:
+    """Clear the cached probe result (tests / session reset)."""
+    global _PROBE_CACHE
+    _PROBE_CACHE = None
+
+
 def probe_llm() -> ProbeResult:
     """Probe the configured LLM and fail fast in live mode when unusable.
 
     Issues a one-token completion through the standard ``get_llm()``
     fallback chain, logs stale-name warnings, and raises ``RuntimeError``
     with a clear remediation message when ``MAKPA_MODE=live`` resolves
-    to the mock provider.
+    to the mock provider. The result is cached per session unless
+    ``MAKPA_LLM_PROBE_ONCE=false`` (debugging).
 
     Returns:
         ProbeResult describing the resolved provider and model.
@@ -62,7 +72,12 @@ def probe_llm() -> ProbeResult:
     Raises:
         RuntimeError: In live mode when no real provider validates.
     """
+    global _PROBE_CACHE
     from makpa.llm import get_llm
+    from makpa.utils.terminal import probe_once_enabled
+
+    if _PROBE_CACHE is not None and probe_once_enabled():
+        return _PROBE_CACHE
 
     settings = get_settings()
     warnings: list[str] = []
@@ -95,10 +110,12 @@ def probe_llm() -> ProbeResult:
         logger.error("Model-name probe: %s", message)
         if settings.resolved_mode == Mode.LIVE:
             raise RuntimeError(message) from e
-        return ProbeResult(
+        result = ProbeResult(
             provider=provider, model=model_name, ok=False,
             message=message, warnings=warnings,
         )
+        _PROBE_CACHE = result
+        return result
 
     if provider == "mock" and settings.resolved_mode == Mode.LIVE:
         message = (
@@ -111,11 +128,13 @@ def probe_llm() -> ProbeResult:
         raise RuntimeError(message)
 
     message = f"LLM probe ok: provider={provider} model={model_name!r}"
-    logger.info("Model-name probe: %s", message)
-    return ProbeResult(
+    logger.debug("Model-name probe: %s", message)
+    result = ProbeResult(
         provider=provider, model=model_name, ok=True,
         message=message, warnings=warnings,
     )
+    _PROBE_CACHE = result
+    return result
 
 
-__all__ = ["KNOWN_STALE_MODELS", "ProbeResult", "probe_llm"]
+__all__ = ["KNOWN_STALE_MODELS", "ProbeResult", "clear_probe_cache", "probe_llm"]

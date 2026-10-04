@@ -864,3 +864,21 @@
   - 2 full-suite failures met on the way were environmental (repo `.env` Qdrant/Google-mode keys), fixed in-test per convention, then green
 - **Blocker**: None. Web gate **passed**
 - **Next**: None â€” web phase closed; servers left running (:8001 harness, :3000 dev) for the user
+
+---
+
+### 2026-10-04T00:00:00Z — CLI-UX-FIX — Review Follow-ups Closed (citations/card/ingest/cancel/tqdm)
+- **Attempted**: Close all five review items on the CLI UX overhaul
+- **Changed**:
+  - `terminal.clean_answer_text` strips `Citations:` suffixes (Answer box ends at prose; citations live only in their section)
+  - Card renderer reads gate-preview `event`/`email` keys (new `_event_fields`/`_email_fields`, combined Event/When + Email-to style for gate 2) and falls back to `payload_preview` plan steps; `title`/`start_time`/`end_time` LLM arg variants aliased; GitHub block gated on repo/head/base markers (no more Title/Body hijack or duplicate Body); leftover scalar args render as fields, never raw repr
+  - Backend (additive only): `confirm_event_node` emits `event{summary,start,end,attendees}`; `confirm_email_node` emits `email{to,subject,body,draft_id}` + created-`event{summary,start,end,attendees,html_link}`
+  - `rag_demo ingest` prints `progress_done` + `format_timing` (keeps "75" for existing test)
+  - Cancelled/confirmation-required exits print `format_cancelled_timing` ("cancelled at confirmation") in google/github/agent reporters and decline wrappers; JSON mode untouched
+  - `setup_logging` sets `HF_HUB_DISABLE_PROGRESS_BARS`/`TRANSFORMERS_NO_ADVISORY_WARNINGS` when not verbose; `run_rag`/`ingest_pdf`/supervisor invoke wrapped in `redirect_stdout(sys.stderr)` so tqdm bars never touch stdout
+  - `tests/test_cli_ux.py`: +8 tests (citation strip, composite card, steps-only card, LLM-variant card, gate preview keys, ingest UX, cancelled footer incl. end-to-end decline, progress-bar env); local `_probe_ok` helper defined in-file
+  - `tests/test_coverage_extra.py`: probe-cache clears between simulated sessions; rag no-citation assertion updated to omission contract
+  - `tests/conftest.py`: autouse fixture isolates banner/probe/LLM caches per test
+- **Validated**: `pytest tests/`: **304 passed, 2 skipped**; ruff + mypy strict clean; live `rag_demo ask` (Answer box citation-free, `--quiet` stdout byte-clean), live composite decline (flagship card: Summary/Start/End/Attendees/To/Subject/Body + cancelled footer); canonical two-gate phrasing still correctly refuses under `own_only`
+- **Blocker**: None
+- **Next**: None — CLI output matches the project quality bar
