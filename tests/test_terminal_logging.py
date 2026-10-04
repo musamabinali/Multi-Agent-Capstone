@@ -76,6 +76,15 @@ def test_wrap_box_lines() -> None:
     assert "".join(wrapped) == long_line
 
 
+def test_confirmation_title() -> None:
+    from makpa.utils.terminal import confirmation_title
+
+    assert confirmation_title({"gate": 1}) == "Confirmation required (gate 1)"
+    assert confirmation_title({"gate": 2}) == "Confirmation required (gate 2)"
+    assert confirmation_title({}) == "Confirmation required"
+    assert confirmation_title({"gate": "?"}) == "Confirmation required"
+
+
 def test_cli_setup_logging_delegates() -> None:
     """Every CLI keeps its _setup_logging entry point (tests call them)."""
     from makpa.cli import agent, github_demo, google_demo, rag_demo

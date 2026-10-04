@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import Any
 
 #: Third-party loggers that spam INFO during normal CLI runs.
 QUIET_LOGGERS = (
@@ -31,6 +32,14 @@ _VERBOSE_VALUES = ("1", "true", "yes", "on")
 def verbose_enabled() -> bool:
     """Return True when MAKPA_VERBOSE requests full debug logging."""
     return os.environ.get("MAKPA_VERBOSE", "").strip().lower() in _VERBOSE_VALUES
+
+
+def confirmation_title(preview: dict[str, Any]) -> str:
+    """Gate-aware confirmation title; no bogus "(gate ?)" when unset."""
+    gate = preview.get("gate")
+    if gate in (1, 2):
+        return f"Confirmation required (gate {gate})"
+    return "Confirmation required"
 
 
 def wrap_box_lines(lines: list[str], width: int = 100) -> list[str]:
@@ -55,4 +64,10 @@ def setup_logging() -> None:
         )
 
 
-__all__ = ["QUIET_LOGGERS", "setup_logging", "verbose_enabled", "wrap_box_lines"]
+__all__ = [
+    "QUIET_LOGGERS",
+    "confirmation_title",
+    "setup_logging",
+    "verbose_enabled",
+    "wrap_box_lines",
+]

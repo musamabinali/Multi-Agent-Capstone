@@ -391,12 +391,13 @@ def _is_interrupted(graph: Any, config: dict[str, Any], result: Any) -> bool:
 def _resolve_confirmation(graph: Any, config: dict[str, Any]) -> dict[str, Any]:
     """Show the boxed preview for the pending gate and resume or cancel."""
     from makpa.utils.interrupts import resume_with
+    from makpa.utils.terminal import confirmation_title
 
     preview = _pending_preview(graph, config)
     gate = preview.get("gate", "?")
     lines = [f"{k}: {v}" for k, v in preview.items()]
     indicator = CALENDAR_INDICATOR if gate == 1 else GMAIL_INDICATOR
-    _boxed(f"Confirmation required (gate {gate})", lines)
+    _boxed(confirmation_title(preview), lines)
     if gate == 2:
         return _resolve_gate2(graph, config, indicator)
     if not typer.confirm(f"{indicator} approve?"):

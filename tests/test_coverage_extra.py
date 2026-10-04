@@ -42,7 +42,13 @@ def test_settings_enum_inputs_and_provider_branches(monkeypatch):
     assert s.makpa_mode == Mode.DEMO
     assert s.resolve_vector_store() == VectorStoreType.CHROMA_HTTP
 
-    for var in ("GEMINI_API_KEY", "GROQ_API_KEY", "PINECONE_API_KEY"):
+    for var in (
+        "GEMINI_API_KEY",
+        "GROQ_API_KEY",
+        "PINECONE_API_KEY",
+        "QDRANT_URL",
+        "QDRANT_API_KEY",
+    ):
         monkeypatch.setenv(var, "")
     monkeypatch.setenv("GROQ_API_KEY", "k")
     assert Settings().resolve_llm_provider() == LLMProvider.GROQ
@@ -67,6 +73,8 @@ def test_settings_enum_inputs_and_provider_branches(monkeypatch):
     )
     monkeypatch.setenv("GOOGLE_CALENDAR_MCP_URL", "http://cal")
     monkeypatch.setenv("GOOGLE_GMAIL_MCP_URL", "http://gmail")
+    # Pin auto: repo .env may pin a concrete GOOGLE_MCP_MODE since setups.
+    monkeypatch.setenv("GOOGLE_MCP_MODE", "auto")
     assert Settings().resolve_google_mcp_mode() == GoogleMCPMode.OFFICIAL
 
     # Real mode in live without PAT warns and degrades.

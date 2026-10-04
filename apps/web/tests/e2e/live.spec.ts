@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { type Page, expect, test } from "@playwright/test";
 
 /**
  * Live-server flows: real backend (:8001) + real frontend (:3000),
@@ -23,7 +23,9 @@ async function confirmModal(page: Page, name: RegExp): Promise<void> {
 test("live RAG flow renders cited answer", async ({ page }) => {
 	await ask(page, "What does the sample PDF say about implementation details?");
 	await expect(page.getByText("RAG agent")).toBeVisible({ timeout: 20_000 });
-	await expect(page.getByText("Overall status: ok")).toBeVisible({ timeout: 20_000 });
+	await expect(page.getByText("Overall status: ok")).toBeVisible({
+		timeout: 20_000,
+	});
 	const chip = page.getByRole("button", { name: /sample\.pdf/ }).first();
 	await expect(chip).toBeVisible({ timeout: 20_000 });
 	await chip.click();
@@ -43,7 +45,9 @@ test("live GitHub flow shows PR 7 in the id table", async ({ page }) => {
 	await expect(table.getByText("octo-demo/hello-world")).toBeVisible();
 });
 
-test("live composite flow confirms two gates and shows ids", async ({ page }) => {
+test("live composite flow confirms two gates and shows ids", async ({
+	page,
+}) => {
 	await ask(
 		page,
 		"Schedule a meeting with a@example.com from 2026-10-06T15:00:00Z " +

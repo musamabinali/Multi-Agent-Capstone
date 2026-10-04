@@ -1,0 +1,9 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 7, "column": 0}, "map": {"version":3,"sources":["file://D%3A/agents/LangGraph-Agent/apps/web/app/page.tsx"],"sourcesContent":["import { redirect } from \"next/navigation\";\n\nexport default function Home() {\n\tredirect(\"/chat\");\n}\n"],"names":[],"mappings":";;;AAAA;AAAA;;AAEe,SAAS;IACvB,CAAA,GAAA,oSAAA,CAAA,WAAQ,AAAD,EAAE;AACV"}},
+    {"offset": {"line": 16, "column": 0}, "map": {"version":3,"sources":[],"names":[],"mappings":"A"}},
+    {"offset": {"line": 27, "column": 0}, "map": {"version":3,"sources":[],"names":[],"mappings":""}},
+    {"offset": {"line": 27, "column": 0}, "map": {"version":3,"sources":[],"names":[],"mappings":"A"}}]
+}

@@ -84,7 +84,7 @@ See `.env.example` for all 80+ variables with defaults and mode requirements.
 | Mode | LLM | Vector Store | MCP Servers | Use Case |
 |------|-----|--------------|-------------|----------|
 | `demo` | Mock | ChromaDB Local | Mock | Zero-setup grading |
-| `free` | Gemini/Groq | Pinecone/Chroma HTTP | Local wrappers | Free-tier demo |
+| `free` | Gemini/Groq (Groq while the Gemini project denial lasts — see R-27) | Pinecone/Chroma HTTP | Local wrappers | Free-tier demo |
 | `live` | Gemini/Groq | Pinecone/Chroma HTTP | Real GitHub + Google | Production |
 
 Mode resolution cascades: missing credentials in `live` → `free`; missing LLM key in `free` → `demo`.
@@ -294,9 +294,42 @@ pnpm dev
 ```
 
 Gates: `pnpm lint` (biome clean), `pnpm typecheck` (`tsc --noEmit` strict),
-`pnpm test` (vitest 19 passed), `pnpm build` (7 routes green).
-Adapter tests: `pytest tests/test_api_server.py -q` (5 passed).
-Design artifacts 1–7: `apps/web/docs/BUILD.md` (spec: `apps/web/docs/Frontend Build.md`).
+`pnpm test` (vitest 26 passed), `pnpm build` (8 routes green),
+`pnpm test:a11y` (axe 4 screens, 0 critical/serious).
+Adapter + parity tests: `pytest tests/test_api_server.py tests/test_api_parity.py -q` (15 passed).
+Design artifacts 1–7: `apps/web/docs/BUILD.md` (spec: `apps/web/docs/Frontend Build.md`);
+audit: `apps/web/docs/REVIEW.md`; gate prompt: `apps/web/docs/Web Phase Review.md`.
+
+## Running the Web Stack (two terminals)
+
+```powershell
+# Terminal 1: deterministic backend harness (mock LLM + mock MCP, child env only)
+.\.venv\Scripts\python.exe scripts/serve_web.py
+# → http://127.0.0.1:8001, OpenAPI at /docs (health: llm mock, github/google mock)
+
+# Terminal 2: frontend (Turbopack dev, /api/* rewrites to :8001)
+cd apps/web
+pnpm dev
+# → http://localhost:3000
+```
+
+Live end-to-end (zero mocked routes — needs both servers up):
+
+```powershell
+cd apps/web
+$env:PLAYWRIGHT_BROWSERS_PATH = "D:\playwright-browsers"  # C: is too full for browsers
+$env:PLAYWRIGHT_API_URL = "http://127.0.0.1:8001"
+$env:PLAYWRIGHT_BASE_URL = "http://localhost:3000"
+./node_modules/.bin/playwright test tests/e2e/live.spec.ts
+# 4/4 green: RAG citations, GitHub PR 7, composite two-gate ids, gate-2 rollback
+```
+
+Notes: `scripts/serve_web.py` forces the mock stack so turns stay fast and deterministic
+(live Groq turns take 30–75s from here; Gemini free tier is 429-exhausted; live inference
+stays proven by `docs/TRACE.md` FLAG-A). The harness also sets `GOOGLE_CALENDAR_ATTENDEE_MODE=all`
+(the default `own_only` correctly refuses the composite auto-create) and points HF/tmp caches at
+`D:\` (C: has no room). The mock calendar store persists to `data/mock_calendar.json` so
+create→update (rollback) works across MCP subprocesses; the repo `.env` is never modified.
 
 ## Project Structure
 

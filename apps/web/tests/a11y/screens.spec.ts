@@ -1,5 +1,5 @@
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test, type Page } from "@playwright/test";
+import { type Page, expect, test } from "@playwright/test";
 
 const HEALTH = {
 	mode: "free",
@@ -56,9 +56,7 @@ const THREAD_GATE1 = {
 };
 
 async function mockShell(page: Page) {
-	await page.route("**/api/health", (route) =>
-		route.fulfill({ json: HEALTH }),
-	);
+	await page.route("**/api/health", (route) => route.fulfill({ json: HEALTH }));
 	await page.route("**/api/threads", (route) =>
 		route.fulfill({ json: { threads: [] } }),
 	);

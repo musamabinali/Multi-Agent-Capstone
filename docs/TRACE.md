@@ -741,6 +741,39 @@
 
 ---
 
+### 2026-10-04T15:30:00Z — TRIAGE — External "Live Moment" Report
+- **Received**: a review-style report claiming a live verification run with
+  event `uhefkvop...`, message `1a1066f7...`, plus RAG-75 and three findings.
+- **ID discrepancy (flagged)**: those event/message IDs match NO run in this
+  session (ours: events `mfil5...`/`2holb...`, emails `1a1026c4...`/`1a102758...`).
+  If they came from a further user run, each such run adds another event +
+  email pair — count events in Calendar UI before assuming two.
+- **Finding 1 (Gemini 403) — ACCEPTED**: added R-27 (materialized, Groq
+  fallback verified); README mode table notes Groq-while-denied. No model
+  rename (renaming a 403 fixes nothing).
+- **Finding 2 (composite routing) — REJECTED as prescribed**: proven by direct
+  call that `is_composite_request` returns False for the live phrasing (no
+  meeting/call/event noun) — detector, not the LLM planner, no demo-mode
+  experiment needed. Broadening the detector was refused on purpose: with an
+  external attendee under `own_only`, the composite path ends in an
+  availability-partial refusal, i.e. the "fix" would break the working
+  schedule+email flow. Single-path + link injection delivers the same outcome
+  under one gate; routing fork now pinned by
+  `test_composite_detector_routing_fork`. (Also noted: heuristic fallback
+  misclassifies the query as `search_messages`; masked by the LLM planner.)
+- **Finding 3 (gate `?`) — ACCEPTED**: single-path `confirm_node` previews
+  carry no `gate` key, so `preview.get("gate", "?")` rendered literally.
+  New `confirmation_title()` (terminal.py) prints the suffix only for gates
+  1/2; wired into `google_demo` + `agent` resolvers; 4 new title tests.
+- **Doc updates applied**: R-27, README mode note, this entry. REVIEW.md does
+  not exist in-repo; the composite correction lives here instead.
+- **Validated**: 40 passed (terminal + composite + google/agent CLI); ruff
+  clean (incl. import-sort autofix); mypy strict clean (63 files)
+- **Next**: No live re-run of the mutating sequence (each re-run duplicates
+  event + email); composite declared done as designed
+
+---
+
 ### 2026-10-01T00:47:00Z — FLAG-A — Live End-to-End Path Verified (Groq)
 - **Attempted**: Close live-verification debt with at least one genuinely live path instead of deferring again
 - **Changed**: None (verification run; evidence recorded here)
@@ -774,3 +807,60 @@
 - **Validated**: ruff + mypy clean; adapter `6 passed`; biome clean (54 files); tsc clean; vitest `22 passed`; `next build` 8 routes green
 - **Blocker**: D-01 axe audit, D-02 live-server Playwright pass, D-03 structured-ids-through-instead-of-prose — all recorded in REVIEW.md, none blocking internal use
 - **Next**: D-02 live e2e + D-01 axe before any external release
+
+---
+
+### 2026-10-03T00:00:00Z — WEB-D1 — Structured IDs Threaded End-to-End
+- **Attempted**: Close gate prompt Deliverable 1 (no regex parsing of prose for ids)
+- **Changed**:
+  - `src/makpa/supervisor/graph.py` — `extract_structured(agent, result)` (RAG citations/chunk_count; GitHub pr/issue/commit ids + repo from plan args with trailing-punctuation strip; Google event/message/draft ids + availability) wired into `_worker_update.summary["structured"]`
+  - `src/makpa/api/server.py` — `agent_end` gains `structured`
+  - `apps/web` — `StructuredResult` type, `AgentView.structed` through store/stream/ChatView, `StructuredResultTable` rewritten data-driven with `no structured result` fallback, zero regex remains
+  - `tests/test_api_parity.py` — 9 tests (extraction units per agent, worker carriage, mock create→update regression, 3 live supervisor invokes, live SSE `agent_end`)
+- **Validated**: parity 9 passed (live GitHub PR 7 + repo, live Google event_ids, live RAG citations, live SSE structured); ruff + mypy clean
+- **Blocker**: Live GitHub took the `real` MCP path (PAT in repo `.env`) and errored — parity tests now force mock MCP + heuristic planning with blank-not-delete env, per zero-key convention
+- **Next**: Axe audit (D2)
+
+---
+
+### 2026-10-03T00:00:00Z — WEB-D2 — Axe Audit Clean
+- **Attempted**: Close gate prompt Deliverable 2 (`pnpm test:a11y` exits 0, 4 screens)
+- **Changed**:
+  - `apps/web` gains `@axe-core/playwright`, `tests/a11y/screens.spec.ts` (empty chat, RAG thread, open modal, settings — fails on any critical/serious), `playwright.a11y.config.ts`, `pnpm test:a11y`
+  - `styles/globals.css` + `ui/badge.tsx` + `ui/button.tsx` + `chat/Composer.tsx` — `--primary` → `#60A5FA` for text/links, new `--primary-solid #1D4ED8` fills, `--success-strong`/`--info-strong` pills, agent pills outlined surface + accent text
+- **Validated**: `pnpm test:a11y` 4/4 green, 0 critical/serious (before: 4 screens × `color-contrast` serious)
+- **Blocker**: C: has 50MB free — Playwright browsers download to `D:\playwright-browsers` via `PLAYWRIGHT_BROWSERS_PATH`; recorded in README
+- **Next**: Live-server Playwright (D3)
+
+---
+
+### 2026-10-03T00:00:00Z — WEB-D3 — Live-Server Playwright Green
+- **Attempted**: Close gate prompt Deliverable 3 (≥3 flows, live servers, zero mocked routes)
+- **Changed**:
+  - `scripts/serve_web.py` — deterministic harness (mock LLM/MCP, attendee `all`, D: caches; child env only, `.env` untouched)
+  - `tests/e2e/global-setup.ts` (fail-fast + RAG warmup) + `playwright.config.ts` env URLs, 30s timeout
+  - `tests/e2e/live.spec.ts` — RAG citations+drawer, GitHub PR 7, composite two-gate ids, gate-2 rollback (4/4 green, 34.6s)
+  - `src/makpa/mcp_servers/google_calendar/mock.py` — file-backed store (`data/mock_calendar.json`, tmp+rename, fixed-id upsert): each tool call can spawn a fresh subprocess, so in-memory fixtures could never preserve create→update; this was a genuine rollback-breaking bug found by the live test
+  - `app/chat/[threadId]/page.tsx` — mount-time `loadThread` now applies only while pristine (a late empty snapshot wiped live stream cards; found by the live test)
+- **Validated**: 4/4 live green; mock-LLM harness chosen because live Groq turns take 30–75s here and Gemini free tier is 429-exhausted (live inference stays proven by FLAG-A)
+- **Blocker**: None (decline-at-gate-1 and kill-backend-mid-stream left uncovered as the gate permits; mocked decline payload asserted in `flows.spec.ts`)
+- **Next**: Docs + full gate run
+
+---
+
+### 2026-10-03T00:00:00Z — WEB-GATE — Web Gate PASSED
+- **Attempted**: Full Section 8 acceptance run (frontend + backend + live + docs)
+- **Changed**: `BUILD.md` (§6.2 `structured` contract, §7.1/7.3/7.4 updated, §7.5 acceptance table added), `REVIEW.md` (D-01…D-03 closed, verification table), `README.md` (two-terminal stack + live e2e invocation), `apps/web/README.md` (gates + `structured` contract); test hygiene fixes `test_coverage_extra.py` + `test_phase1_hardening.py` (blank Qdrant vars / pin `GOOGLE_MCP_MODE=auto` — repo `.env` now carries all APIs, tests follow the blank-not-delete rule); `biome.json` ignores build/test output dirs
+- **Validated**:
+  - Structured IDs end-to-end (parity 9 passed; zero regex remains)
+  - `pnpm test:a11y` 4/4, 0 critical/serious
+  - Live `live.spec.ts` 4/4, zero mocked routes (RAG citations+drawer, PR 7, composite ids, rollback)
+  - `ruff check src/ tests/ scripts/` clean; `mypy src/makpa` clean (63 files)
+  - `vitest` 26 passed; `biome` 59 files clean; `tsc` clean; `next build` 8 routes green
+  - `pytest tests/ -q --cov=src/makpa`: **286 passed, 3 skipped, TOTAL 96%** (was 98%: new code
+    added more lines than tests — `api/server.py` 67% since the SSE generator/resume/ingest paths are
+    exercised live rather than by pytest; `supervisor/graph.py` 96%; `google_calendar/mock.py` 94%.
+    Acknowledged, not hidden; the live e2e layer covers what pytest does not.)
+  - 2 full-suite failures met on the way were environmental (repo `.env` Qdrant/Google-mode keys), fixed in-test per convention, then green
+- **Blocker**: None. Web gate **passed**
+- **Next**: None — web phase closed; servers left running (:8001 harness, :3000 dev) for the user

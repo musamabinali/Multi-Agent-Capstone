@@ -599,6 +599,9 @@ def test_settings_vector_and_github_paths(monkeypatch):
     from makpa.config import Mode, Settings, VectorStoreType
 
     monkeypatch.setenv("PINECONE_API_KEY", "")
+    # Blank (never delete): repo .env carries keys, incl. Qdrant since setups.
+    monkeypatch.setenv("QDRANT_URL", "")
+    monkeypatch.setenv("QDRANT_API_KEY", "")
     # Qdrant requested with no creds falls back to Chroma HTTP (non-demo).
     s2 = Settings(vector_store="qdrant")
     s2.resolved_mode = Mode.FREE

@@ -28,6 +28,7 @@
 | R-24 | Parallel dispatch race conditions (Send branches clobbering shared state) | Medium | High | Merge reducers on `agent_outputs`/`confirmations`; workers write only their own keys; wall-time test proves parallel barrier behavior | |
 | R-25 | Aggregation lossy merges (citations/ids dropped in the final message) | Medium | High | JSON summaries per agent decoded into attributed sections; e2e tests assert citations, event ids, message ids preserved | |
 | R-26 | Thread-state collisions (shared threads leaking state between scenarios) | Medium | High | Deterministic per-scenario threads (`demo-{i}`); explicit `--thread` ids; no random identifiers; leak caught once by isolated-thread demo runs | |
+| R-27 | Gemini project-level denial (403 PERMISSION_DENIED) — MATERIALIZED 2026-10-04 | High | High | Fallback chain to Groq verified end to end (3+ live resolutions); blank `GEMINI_API_KEY` to skip the probe stall; root cause (flagged Cloud project) needs support contact or a new project | |
 
 ## Risk Assessment Matrix
 

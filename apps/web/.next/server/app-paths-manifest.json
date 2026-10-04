@@ -1,4 +1,7 @@
 {
   "/chat/page": "app/chat/page.js",
-  "/chat/[threadId]/page": "app/chat/[threadId]/page.js"
+  "/chat/[threadId]/page": "app/chat/[threadId]/page.js",
+  "/settings/page": "app/settings/page.js",
+  "/page": "app/page.js",
+  "/health/page": "app/health/page.js"
 }

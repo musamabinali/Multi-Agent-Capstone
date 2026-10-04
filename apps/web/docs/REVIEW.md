@@ -53,29 +53,54 @@ Three deferred items remain (D-01…D-03) — all documented, none blocking inte
   `/settings`, `/health`, `/docs`).
 - `biome.json` now ignores `.next/**`, `out/**` (build output was being linted after `next build`).
 
-## Verified after fixes
+## Verified after fixes (web-gate close-out)
 
 | Gate | Result |
 |------|--------|
-| `ruff check src/makpa/api/ tests/test_api_server.py` | clean |
-| `mypy src/makpa/api --config-file=mypy.ini --follow-imports=skip` | clean (2 files) |
-| `pytest tests/test_api_server.py -q` | 6 passed |
-| `biome check .` | clean (54 files) |
+| `ruff check src/ tests/ scripts/` | clean |
+| `mypy` backend (strict, incl. new `extract_structured` + mock store) | clean |
+| `pytest tests/test_api_server.py tests/test_api_parity.py -q` | 15 passed (6 + 9) |
+| `biome check .` | clean (55 files) |
 | `tsc --noEmit` (strict + `noUncheckedIndexedAccess`) | clean |
-| `vitest run` | 22 passed |
+| `vitest run` | 26 passed |
 | `next build` | 8 routes green |
+| `pnpm test:a11y` | 4/4 screens, 0 critical/serious |
+| live `playwright test tests/e2e/live.spec.ts` | 4/4 green, zero mocked routes |
 
-## Deferred (honest, not hidden)
+## Deferred → closed in the web-gate pass (2026-10-03)
 
-- **D-01 — axe audit.** `@axe-core/playwright` not installed; no automated a11y run yet. Mitigation: biome
-  `a11y` rules enforced (button types, semantic elements), focus ring/`aria-live`/`alertdialog`/keyboard chips
-  implemented per §7.6. Run before any external release.
-- **D-02 — Playwright against live servers.** E2E currently mocks the adapter. Still needed: backend `:8001` +
-  `pnpm dev` pass covering RAG cited answer, composite two-gate confirm, and gate-2 rollback end to end.
-- **D-03 — `StructuredResultTable` recall.** It regexes ids out of answer text; sub-agent summaries carry tool
-  names/statuses but not always full payloads, so the table can be empty when the answer prose omits ids.
-  The authoritative ids are always present in `agent_outputs` API responses — a future pass should thread the
-  structured fields through instead of parsing prose.
+- **D-01 — axe audit: CLOSED.** `@axe-core/playwright` added; `tests/a11y/screens.spec.ts` covers empty chat,
+  RAG thread, open modal, settings; `pnpm test:a11y` exits 0 with zero critical/serious on all four.
+  Before: 4 screens × `color-contrast` serious. Fix: `--primary` → `#60A5FA` for text/links, new
+  `--primary-solid #1D4ED8` for button fills, `--success-strong`/`--info-strong` solid pills, agent pills
+  restyled to outlined surface + accent text. Recorded in `BUILD.md` §7.4.
+- **D-02 — Playwright against live servers: CLOSED.** `tests/e2e/live.spec.ts` runs 4 flows against real
+  backend `:8001` + frontend `:3000` with zero mocked routes (RAG citations+drawer, GitHub PR 7, composite
+  two-gate ids, gate-2 rollback) — 4/4 green. Harness: `scripts/serve_web.py` (mock-backed stack, child env
+  only, `.env` untouched) + `global-setup.ts` (fail-fast + RAG warmup). Mocked `flows.spec.ts` kept for
+  payload-shape assertions only. Live-LLM turns take 30–75s from here and Gemini free tier is 429-exhausted,
+  so the harness runs mock LLM; live inference stays proven by FLAG-A and the parity live-SSE test.
+  Decline-at-gate-1 and kill-backend-mid-stream remain uncovered (optional per gate) — mocked decline payload
+  is asserted in `flows.spec.ts`.
+- **D-03 — `StructuredResultTable` recall: CLOSED.** Ids now thread from `tool_results` via
+  `supervisor/graph.py::extract_structured` → `_worker_update.summary["structured"]` →
+  `agent_end.structured` → typed `StructuredResult` state → data-driven table with a `no structured result`
+  fallback. Zero regex remains (verified by search). Along the way this exposed and fixed a genuine mock bug:
+  mock `calendar_create_event` never stored the event, so gate-2 rollback `update` always failed with
+  `event not found` — the mock store is now file-backed (`data/mock_calendar.json`, atomic tmp+rename,
+  fixed-id upsert; Gmail mock needed no change). Environment note: each MCP tool call can spawn a fresh
+  server subprocess, which is why in-memory fixtures could never work here.
+
+## Correction — prior rollback verification was weaker than claimed
+
+Prior rollback verification (Phase 3 acceptance, `GRADER_CHECKLIST.md`, `VIVA_QA.md`) relied on a
+mock that did not persist state: mock `calendar_create_event` returned a fixed `evt-mock-100` without
+storing it, so any `calendar_update_event` for that id failed with `event not found` — and the mocked
+unit tests passed anyway because they stubbed the service layer instead of exercising create→update.
+Live e2e on 2026-10-04 exposed this: the gate-2 rollback flow ended in `error`, not `rolled_back`.
+The mock now uses a file-backed store (`data/mock_calendar.json`, tmp+rename, fixed-id upsert) and the
+rollback path is verified live (`live.spec.ts`: gate-2 Rollback → event cancelled). Earlier claims stand
+corrected by this entry; nothing was quietly fixed underneath.
 
 ## Anti-pattern spot-check (§12)
 

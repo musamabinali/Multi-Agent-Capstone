@@ -1,6 +1,14 @@
 {
 	"$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
-	"files": { "ignore": [".next/**", "out/**", "node_modules/**"] },
+	"files": {
+		"ignore": [
+			".next/**",
+			"out/**",
+			"node_modules/**",
+			"test-results/**",
+			"playwright-report/**"
+		]
+	},
 	"organizeImports": { "enabled": true },
 	"linter": { "enabled": true, "rules": { "recommended": true } },
 	"formatter": { "enabled": true }

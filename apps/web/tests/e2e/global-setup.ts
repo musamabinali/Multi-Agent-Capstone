@@ -33,7 +33,8 @@ export default async function globalSetup(): Promise<void> {
 				`(PYTHONPATH=src python -m uvicorn makpa.api.server:app --port 8001). Cause: ${lastError}`,
 		);
 	}
-	if (!health.ok) throw new Error(`web gate: backend health ${health.status} at ${api}`);
+	if (!health.ok)
+		throw new Error(`web gate: backend health ${health.status} at ${api}`);
 	const body = (await health.json()) as { mode?: string };
 	console.log(`web gate: backend ${api} ok (mode=${body.mode ?? "?"})`);
 
@@ -42,7 +43,8 @@ export default async function globalSetup(): Promise<void> {
 			`web gate: frontend unreachable at ${web} — start it first (pnpm dev). Cause: ${String(error)}`,
 		);
 	});
-	if (!chat.ok) throw new Error(`web gate: frontend /chat ${chat.status} at ${web}`);
+	if (!chat.ok)
+		throw new Error(`web gate: frontend /chat ${chat.status} at ${web}`);
 	console.log(`web gate: frontend ${web} ok`);
 
 	// Warm the embedding model + retrieval path so the 30s per-test budget

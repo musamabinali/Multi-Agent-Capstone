@@ -150,6 +150,21 @@ def test_composite_check_error_and_routes():
     assert g.route_after_check(busy_results) == "synthesize"
 
 
+def test_composite_detector_routing_fork():
+    """Document the routing fork: canonical phrasing takes the two-gate
+    composite path; natural email-clause phrasing takes the single-gate
+    LLM path (whose link injection covers the same outcome)."""
+    from makpa.subagents.google import graph as g
+
+    assert g.is_composite_request(QUESTION) is True
+    natural = (
+        "Schedule 'Project Sync' with a@example.com "
+        "from 2026-10-05T14:00:00+05:00 to 2026-10-05T14:30:00+05:00 "
+        "and email them 'Hi, confirming our sync.'"
+    )
+    assert g.is_composite_request(natural) is False
+
+
 def test_execute_injects_event_link_into_followup_email():
     from makpa.subagents.google import graph as g
 

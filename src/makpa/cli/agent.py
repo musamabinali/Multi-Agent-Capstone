@@ -163,12 +163,13 @@ def _run_once(graph: Any, config: dict[str, Any], payload: dict[str, Any]) -> di
 def _resolve_confirmation(graph: Any, config: dict[str, Any]) -> dict[str, Any]:
     """Boxed gate prompt with rollback support for gate 2."""
     from makpa.utils.interrupts import resume_with
+    from makpa.utils.terminal import confirmation_title
 
     preview = _pending_preview(graph, config)
     indicator = _indicator_for_preview(preview)
     gate = preview.get("gate", "?")
     lines = [f"{k}: {v}" for k, v in preview.items()]
-    _boxed(f"Confirmation required (gate {gate})", lines)
+    _boxed(confirmation_title(preview), lines)
     if gate == 2:
         choice = typer.prompt(
             f"{indicator} approve? [y/N/rollback]", default="n"
